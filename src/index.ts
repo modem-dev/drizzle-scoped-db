@@ -73,7 +73,7 @@ export type ScopedTableRule<
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
   /**
    * Optional strict-mode validator for checking whether user-supplied where already includes scope.
-   * Required when `requireScopeInWhere` is enabled; rules without a detector fail strict validation.
+   * Required when `strict` mode is enabled; rules without a detector fail strict validation.
    */
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
 };
@@ -98,10 +98,8 @@ export type CreateScopedDbOptions<TScope> = {
   scopeValue: TScope;
   /** Table-specific scoping rules. Tables without rules pass through unchanged. */
   rules: ScopedTableRule<TScope>[];
-  /** Require scoped table queries to call `.where(...)` before execution. */
-  requireWhere?: boolean;
-  /** Require user-provided where clauses to already include the declared scope predicate. */
-  requireScopeInWhere?: boolean;
+  /** Enable strict mode: callers must provide `.where(...)` and include the declared scope predicate. */
+  strict?: boolean;
   /** Property name for the intentionally unsafe unscoped DB escape hatch. Defaults to `_unsafeUnscopedDb`. */
   unscopedDbPropertyName?: string;
   /** Optional property name that exposes the current scope value. */
@@ -143,7 +141,7 @@ export type ScopeByColumnOptions<TScope> = {
   tableName?: string;
   /** Insert row property that should equal the current scope value. */
   insertKey?: string;
-  /** SQL column name used by strict `requireScopeInWhere` validation. Defaults to the Drizzle column name. */
+  /** SQL column name used by strict validation. Defaults to the Drizzle column name. */
   columnName?: string;
   /** Custom equality function for insert validation. Defaults to Object.is. */
   equals?: (rowValue: unknown, scopeValue: TScope) => boolean;
@@ -413,7 +411,7 @@ function wrapRelationalMethod<TScope, TResult>(
   return (config) => {
     const originalWhere = config?.where;
 
-    if (originalWhere === undefined && options.requireWhere) {
+    if (originalWhere === undefined && options.strict) {
       throw createMissingWhereError(getRuleTableName(rule), options);
     }
 
@@ -630,11 +628,11 @@ function assertWhereAllowed<TScope>(
   rule: ScopedTableRule<TScope>,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): void {
-  if (!condition && options.requireWhere) {
+  if (!condition && options.strict) {
     throw createMissingWhereError(getRuleTableName(rule), options);
   }
 
-  if (options.requireScopeInWhere && !rule.hasScopeInWhere?.(condition)) {
+  if (options.strict && !rule.hasScopeInWhere?.(condition)) {
     throw createMissingScopeError(getRuleTableName(rule), options);
   }
 }

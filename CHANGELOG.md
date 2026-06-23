@@ -8,6 +8,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
+- Collapse separate strictness options into a single `strict` configuration flag.
+
 ### Fixed
 
 ## [0.6.0] - 2026-06-23

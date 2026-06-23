@@ -138,37 +138,22 @@ const project = await workspaceDb.query.projects.findFirst({
 
 Tables without a matching rule pass through unchanged.
 
-## Require a caller `where` clause
+## Strict mode
 
-By default, a scoped query may execute without a caller-provided `where`; the wrapper injects only the scope predicate.
+The default safety mechanism is predicate injection: the wrapper adds the declared scope predicate even if the caller forgets it.
 
-Enable `requireWhere` if every scoped select/update/delete should include an explicit caller condition:
+Enable `strict` when you also want codebase discipline. In strict mode, scoped selects, updates, deletes, and relational queries must provide a caller `where` clause, and that `where` clause must explicitly include the declared scope predicate.
 
 ```ts
 const workspaceDb = createScopedDb(db, {
   scopeName: "workspace",
   scopeValue: workspaceId,
-  requireWhere: true,
+  strict: true,
   rules: [scopeByColumn(projects, projects.workspaceId)],
 });
 
 // Throws MissingScopedWhereError
 await workspaceDb.select().from(projects);
-```
-
-## Strict scope-in-where mode
-
-The default safety mechanism is predicate injection: the wrapper adds the declared scope predicate even if the caller forgets it.
-
-Enable `requireScopeInWhere` when you also want to enforce codebase discipline by requiring callers to include the scope predicate in their own `where` clauses.
-
-```ts
-const workspaceDb = createScopedDb(db, {
-  scopeName: "workspace",
-  scopeValue: workspaceId,
-  requireScopeInWhere: true,
-  rules: [scopeByColumn(projects, projects.workspaceId)],
-});
 
 // Throws MissingScopedPredicateError
 await workspaceDb.select().from(projects).where(eq(projects.id, projectId));
@@ -180,7 +165,7 @@ await workspaceDb
   .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
 ```
 
-This mode inspects Drizzle SQL chunks to detect column references. Custom `defineScopedTable` rules must provide `hasScopeInWhere`; otherwise strict validation fails because the wrapper has no safe way to prove the caller supplied the scope predicate.
+Strict mode inspects Drizzle SQL chunks to detect column references. Custom `defineScopedTable` rules must provide `hasScopeInWhere`; otherwise strict validation fails because the wrapper has no safe way to prove the caller supplied the scope predicate.
 
 ## Custom scope rules
 
@@ -265,8 +250,7 @@ type CreateScopedDbOptions<TScope> = {
   scopeName: string;
   scopeValue: TScope;
   rules: ScopedTableRule<TScope>[];
-  requireWhere?: boolean;
-  requireScopeInWhere?: boolean;
+  strict?: boolean;
   unscopedDbPropertyName?: string; // defaults to '_unsafeUnscopedDb'
   scopeValueProperty?: string;
   toJSON?: (scopeValue: TScope, scopeName: string) => unknown;
@@ -296,14 +280,14 @@ type ScopedTableRule<TScope, TInsert = Record<string, unknown>> = {
   tableName?: string;
   where: (scopeValue: TScope) => SQL | undefined;
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
-  // Required when createScopedDb({ requireScopeInWhere: true }) is enabled.
+  // Required when createScopedDb({ strict: true }) is enabled.
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
 };
 ```
 
 ### `assertDrizzleCompatibility(condition, expectedColumnName)`
 
-Optional startup assertion for projects that rely on `requireScopeInWhere` or `containsColumnFilter`.
+Optional startup assertion for projects that rely on `strict` mode or `containsColumnFilter`.
 
 ```ts
 import { assertDrizzleCompatibility } from "@modemdev/drizzle-scoped-db";

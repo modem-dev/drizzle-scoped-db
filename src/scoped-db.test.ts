@@ -256,11 +256,11 @@ describe("createScopedDb", () => {
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(false);
   });
 
-  it("throws when a scoped select is executed without where and requireWhere is enabled", () => {
+  it("throws when a scoped select is executed without where and strict mode is enabled", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireWhere: true,
+      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -268,23 +268,23 @@ describe("createScopedDb", () => {
     expect(() => query.then(() => undefined)).toThrow(MissingScopedWhereError);
   });
 
-  it("throws on direct await without where when requireScopeInWhere is enabled", () => {
+  it("throws the missing-where error on direct await without where when strict mode is enabled", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireScopeInWhere: true,
+      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
     const query = scopedDb.select().from(projectsTbl) as unknown as PromiseLike<unknown>;
-    expect(() => query.then(() => undefined)).toThrow(MissingScopedPredicateError);
+    expect(() => query.then(() => undefined)).toThrow(MissingScopedWhereError);
   });
 
   it("can require the caller where clause to include the declared scope column", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireScopeInWhere: true,
+      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -500,11 +500,11 @@ describe("createScopedDb", () => {
     expect((scopedDb.query as Record<string, unknown>).incomplete).toBe(rawDb.query.incomplete);
   });
 
-  it("throws on explicit undefined where clauses when requireWhere is enabled", () => {
+  it("throws on explicit undefined where clauses when strict mode is enabled", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireWhere: true,
+      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -513,11 +513,11 @@ describe("createScopedDb", () => {
     );
   });
 
-  it("throws on relational queries without where when requireWhere is enabled", () => {
+  it("throws on relational queries without where when strict mode is enabled", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireWhere: true,
+      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
     });
 
@@ -564,8 +564,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireWhere: true,
-      requireScopeInWhere: true,
+      strict: true,
       rules: [
         scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
           insertKey: "workspaceId",
@@ -602,7 +601,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      requireScopeInWhere: true,
+      strict: true,
       rules: [
         defineScopedTable<string, typeof projectsTbl>(projectsTbl, {
           where: (scope) => eq(projectsTbl.workspaceId, scope),
