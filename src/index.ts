@@ -351,21 +351,33 @@ function createScopedFromBuilder<
 >(
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
   builder: any,
-  rule: ScopedTableRule<TScope, TTable>,
+  rootRule: ScopedTableRule<TScope, TTable>,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): ScopedQueryBuilder<TTable, TResult> {
   return {
     where(condition: SQL | undefined): ScopedWhereBuilder<TResult> {
-      assertWhereAllowed(condition, rule, options);
-      return builder.where(scopeCondition(condition, rule, options)) as ScopedWhereBuilder<TResult>;
+      assertWhereAllowed(condition, rootRule, options);
+      return builder.where(
+        scopeCondition(condition, rootRule, options),
+      ) as ScopedWhereBuilder<TResult>;
     },
 
     leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
-      return createScopedFromBuilder(builder.leftJoin(joinTable, on), rule, options);
+      const joinRule = options.rulesByTable.get(joinTable);
+      return createScopedFromBuilder(
+        builder.leftJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
+        rootRule,
+        options,
+      );
     },
 
     innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
-      return createScopedFromBuilder(builder.innerJoin(joinTable, on), rule, options);
+      const joinRule = options.rulesByTable.get(joinTable);
+      return createScopedFromBuilder(
+        builder.innerJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
+        rootRule,
+        options,
+      );
     },
 
     // oxlint-disable-next-line unicorn/no-thenable -- Query builders intentionally act as thenables to catch direct awaits.
@@ -373,8 +385,8 @@ function createScopedFromBuilder<
       onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2> {
-      assertWhereAllowed(undefined, rule, options);
-      return Promise.resolve(builder.where(scopeCondition(undefined, rule, options))).then(
+      assertWhereAllowed(undefined, rootRule, options);
+      return Promise.resolve(builder.where(scopeCondition(undefined, rootRule, options))).then(
         onfulfilled,
         onrejected,
       );
@@ -645,7 +657,21 @@ function isStrictMode<TScope>(options: NormalizedCreateScopedDbOptions<TScope>):
   return options.strict !== false;
 }
 
-/** Combine a user condition with the table's declared scope predicate. */
+/** Add a joined table's scope predicate to the join condition while preserving outer-join semantics. */
+function scopeJoinCondition<TScope>(
+  condition: SQL,
+  rule: ScopedTableRule<TScope> | undefined,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): SQL {
+  const scopedPredicate = rule?.where(options.scopeValue);
+  if (!scopedPredicate) {
+    return condition;
+  }
+
+  return and(condition, scopedPredicate) as SQL;
+}
+
+/** Combine a user condition with one table's declared scope predicate. */
 function scopeCondition<TScope>(
   condition: SQL | undefined,
   rule: ScopedTableRule<TScope>,

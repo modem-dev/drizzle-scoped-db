@@ -10,7 +10,7 @@ Think of it as a typed, application-layer alternative to Row Level Security (RLS
 
 - Create a scoped DB handle once per request, job, or tenant context.
 - Declare scoping rules once per table.
-- Automatically inject scope predicates into `select`, `update`, `delete`, and relational `findFirst` / `findMany` queries.
+- Automatically inject scope predicates into `select`, joined tables with rules, `update`, `delete`, and relational `findFirst` / `findMany` queries.
 - Validate scoped inserts before they reach the database.
 - Model any scope shape: one column, different columns per table, composite predicates, or custom validators.
 - Keep the tenant boundary visible in TypeScript by passing scoped DB handles instead of the raw DB.
@@ -80,6 +80,20 @@ const project = await workspaceDb
 
 The wrapper still injects the workspace predicate again as defense in depth.
 
+Joined tables with declared rules receive their own scope predicates too. For joins, the joined table predicate is added to the join condition so `leftJoin` keeps its outer-join behavior:
+
+```ts
+const rows = await workspaceDb
+  .select()
+  .from(projects)
+  .leftJoin(tasks, eq(tasks.projectId, projects.id))
+  .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
+
+// Also injected automatically:
+// - eq(projects.workspaceId, workspaceId) in the WHERE clause
+// - eq(tasks.workspaceId, workspaceId) in the JOIN condition
+```
+
 ## Insert validation
 
 When `insertKey` is provided, inserted rows must match the current scope value.
@@ -142,6 +156,8 @@ const project = await workspaceDb.query.projects.findFirst({
 ```
 
 Tables without a matching rule pass through unchanged.
+
+Relational `with` entries are still Drizzle relation configs, not explicit join builder calls. Root `findFirst` / `findMany` queries are scoped; nested relation safety should come from tenant-safe relationships, explicit relation filters where Drizzle supports them, or database constraints.
 
 ## Strict mode
 
@@ -217,12 +233,16 @@ workspaceDb._unsafeUnscopedDb;
 
 Use it for migrations, admin jobs, test setup, cross-tenant maintenance, or unsupported query shapes. Queries through this property are not scoped.
 
+For select joins built with `.leftJoin(...)` or `.innerJoin(...)`, every joined table with a declared rule gets its own injected scope predicate in the join condition. Joined tables without rules pass through unchanged.
+
 Not protected:
 
 - raw SQL executed through the original DB
 - queries run through `_unsafeUnscopedDb`
 - custom helpers that close over the original unscoped DB
 - query builder methods not wrapped by this package
+- joined tables without declared rules
+- nested relational `with` rows whose tenant safety is not enforced by relationships, explicit filters, or database constraints
 - code that deliberately bypasses the scoped DB capability
 
 If your threat model includes arbitrary raw SQL execution, compromised application code, or direct database access outside your app, use database-native controls as well.
@@ -245,9 +265,9 @@ Expected support:
 
 Currently wrapped:
 
-- `select().from(table).where(...)`
-- `selectDistinct().from(table).where(...)`
-- `selectDistinctOn(...).from(table).where(...)` when supported by the driver
+- `select().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
+- `selectDistinct().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
+- `selectDistinctOn(...).from(table).where(...)` when supported by the driver, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `insert(table).values(...)`
 - `update(table).set(...).where(...)`
 - `delete(table).where(...)`

@@ -18,6 +18,13 @@ const projectsTbl = pgTable("projects", {
   name: text("name").notNull(),
 });
 
+const tasksTbl = pgTable("tasks", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  taskWorkspaceId: text("task_workspace_id").notNull(),
+  title: text("title").notNull(),
+});
+
 const usersTbl = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull(),
@@ -25,6 +32,7 @@ const usersTbl = pgTable("users", {
 
 type FakeDbState = {
   selectCondition?: SQL;
+  joinConditions?: SQL[];
   insertValues?: unknown;
   updateCondition?: SQL;
   deleteCondition?: SQL;
@@ -205,10 +213,12 @@ function createFromBuilder(state: FakeDbState): FakeFromBuilder {
         },
       };
     },
-    leftJoin(_table: unknown, _on: SQL): FakeFromBuilder {
+    leftJoin(_table: unknown, on: SQL): FakeFromBuilder {
+      state.joinConditions = [...(state.joinConditions ?? []), on];
       return builder;
     },
-    innerJoin(_table: unknown, _on: SQL): FakeFromBuilder {
+    innerJoin(_table: unknown, on: SQL): FakeFromBuilder {
+      state.joinConditions = [...(state.joinConditions ?? []), on];
       return builder;
     },
   };
@@ -443,6 +453,80 @@ describe("createScopedDb", () => {
     expect(rawDb._state.insertValues).toEqual({ id: "user-1", email: "user@example.com" });
     expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(false);
     expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(false);
+  });
+
+  it("injects scope predicates for joined tables with declared rules", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [
+        scopeByColumn(projectsTbl, projectsTbl.workspaceId),
+        scopeByColumn(tasksTbl, tasksTbl.taskWorkspaceId),
+      ],
+    });
+
+    scopedDb
+      .select()
+      .from(projectsTbl)
+      .leftJoin(tasksTbl, eq(tasksTbl.projectId, projectsTbl.id))
+      .where(and(eq(projectsTbl.id, "project-1"), eq(projectsTbl.workspaceId, "workspace-1")));
+
+    expect(rawDb._state.selectCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.selectCondition, "task_workspace_id")).toBe(false);
+    expect(rawDb._state.joinConditions).toHaveLength(1);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "project_id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "task_workspace_id")).toBe(true);
+  });
+
+  it("injects joined table predicates into every matching join condition", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [
+        scopeByColumn(projectsTbl, projectsTbl.workspaceId),
+        scopeByColumn(tasksTbl, tasksTbl.taskWorkspaceId),
+      ],
+    });
+
+    scopedDb
+      .select()
+      .from(projectsTbl)
+      .leftJoin(tasksTbl, eq(tasksTbl.projectId, projectsTbl.id))
+      .innerJoin(tasksTbl, eq(tasksTbl.id, projectsTbl.id))
+      .where(eq(projectsTbl.id, "project-1"));
+
+    expect(rawDb._state.joinConditions).toHaveLength(2);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "task_workspace_id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[1], "task_workspace_id")).toBe(true);
+  });
+
+  it("leaves joined table conditions unchanged when a joined rule produces no predicate", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [
+        scopeByColumn(projectsTbl, projectsTbl.workspaceId),
+        defineScopedTable<string, typeof tasksTbl>(tasksTbl, {
+          where: () => undefined,
+        }),
+      ],
+    });
+
+    scopedDb
+      .select()
+      .from(projectsTbl)
+      .leftJoin(tasksTbl, eq(tasksTbl.projectId, projectsTbl.id))
+      .where(eq(projectsTbl.id, "project-1"));
+
+    expect(rawDb._state.joinConditions).toHaveLength(1);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "project_id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "task_workspace_id")).toBe(false);
   });
 
   it("covers selected-column distinct builders and join wrappers", () => {
