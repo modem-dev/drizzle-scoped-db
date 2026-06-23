@@ -160,7 +160,43 @@ const project = await workspaceDb.query.projects.findFirst({
 
 Tables without a matching rule pass through unchanged.
 
-Relational `with` entries are root-only today: `findFirst` / `findMany` are scoped, but nested relation rows rely on tenant-safe relationships, explicit relation filters, or database constraints.
+By default, relational `with` entries are root-only: `findFirst` / `findMany` are scoped, but nested relation rows rely on tenant-safe relationships, explicit relation filters, or database constraints.
+
+Experimental POC: pass `relationalWithMode: "scope"` and add a relation map to scope nested `with` entries recursively.
+
+```ts
+const taskRule = scopeByColumn(tasks, tasks.workspaceId, {
+  queryName: "tasks",
+  insertKey: "workspaceId",
+});
+
+const projectRule = scopeByColumn(projects, projects.workspaceId, {
+  queryName: "projects",
+  insertKey: "workspaceId",
+  relations: {
+    tasks: taskRule,
+  },
+});
+
+const workspaceDb = createScopedDb(db, {
+  scopeName: "workspace",
+  scopeValue: workspaceId,
+  relationalWithMode: "scope",
+  rules: [projectRule, taskRule],
+});
+
+await workspaceDb.query.projects.findFirst({
+  where: (project, { and, eq }) =>
+    and(eq(project.id, projectId), eq(project.workspaceId, workspaceId)),
+  with: {
+    tasks: true,
+  },
+});
+
+// Also injected into the nested relation: eq(tasks.workspaceId, workspaceId)
+```
+
+In `"scope"` mode, every requested relation must be present in the parent rule's `relations` map. Use `relationalWithMode: "forbid"` to reject relational `with` entirely.
 
 ## Data model shape
 
@@ -274,12 +310,14 @@ Use it for migrations, admin jobs, test setup, cross-tenant maintenance, or unsu
 
 The wrapper scopes supported selects, joins, mutations, root relational queries, and validated inserts. The schema shape in [Data model shape](#data-model-shape) still matters: your data model needs ownership columns, indexes, and relationship invariants that match how your app scopes data.
 
+Relational `with` is root-only by default. The experimental `relationalWithMode: "scope"` POC can recursively scope mapped relations; `relationalWithMode: "forbid"` rejects `with` configs when you prefer fail-closed behavior.
+
 Not protected:
 
 - raw SQL, `_unsafeUnscopedDb`, or helpers that close over the raw DB
 - query builder methods not wrapped by this package
 - tables or joined tables without rules
-- nested relational `with` rows unless your relationships, filters, or constraints enforce tenant safety
+- nested relational `with` rows when using default `relationalWithMode: "root-only"`, unless relationships, filters, or constraints enforce tenant safety
 - invalid cross-tenant rows that your database constraints allow
 - deliberate bypasses of the scoped DB capability
 
@@ -325,6 +363,7 @@ type CreateScopedDbOptions<TScope> = {
   scopeValue: TScope;
   rules: ScopedTableRule<TScope>[];
   strict?: boolean; // defaults to true
+  relationalWithMode?: "root-only" | "scope" | "forbid"; // defaults to 'root-only'
   unscopedDbPropertyName?: string; // defaults to '_unsafeUnscopedDb'
   scopeValueProperty?: string;
   toJSON?: (scopeValue: TScope, scopeName: string) => unknown;
@@ -339,6 +378,7 @@ type CreateScopedDbOptions<TScope> = {
 type ScopeByColumnOptions<TScope> = {
   queryName?: string;
   tableName?: string;
+  relations?: Record<string, ScopedTableRule<TScope> | string>;
   insertKey?: string;
   columnName?: string;
   equals?: (rowValue: unknown, scopeValue: TScope) => boolean;
@@ -356,6 +396,7 @@ type ScopedTableRule<TScope, TInsert = Record<string, unknown>> = {
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
   // Required when createScopedDb({ strict: true }) is enabled.
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
+  relations?: Record<string, ScopedTableRule<TScope> | string>;
 };
 ```
 
@@ -377,6 +418,7 @@ If a Drizzle upgrade changes the internal SQL chunk shape, this fails fast inste
 - `MissingScopedWhereError`
 - `MissingScopedPredicateError`
 - `InvalidScopedInsertError`
+- `UnsupportedRelationalWithError`
 
 You can replace these with custom error factories in `createScopedDb({ errors })`.
 

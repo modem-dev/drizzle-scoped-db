@@ -7,6 +7,7 @@ All notable user-visible changes to this project are documented in this file.
 ### Added
 
 - Inject scope predicates for joined tables with declared rules in select query builders.
+- Add an experimental POC for recursively scoping mapped relational `with` entries.
 
 ### Changed
 
