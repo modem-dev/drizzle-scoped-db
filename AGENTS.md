@@ -16,7 +16,7 @@
 - Keep the public API small and stable.
 - Preserve dialect-generic Drizzle core types where possible.
 - Treat `_unsafeUnscopedDb` as an intentionally loud escape hatch.
-- Do not add Modem-internal dependencies to this standalone package.
+- Do not add application-internal dependencies to this standalone package.
 - Prefer behavior-focused tests over implementation-only assertions.
 
 ## Validation

@@ -16,7 +16,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Added
 
-- Initial standalone package setup copied from Modem's Drizzle scoped DB extraction.
+- Initial standalone package setup with typed Drizzle scoped DB helpers.
 
 ### Changed
 
