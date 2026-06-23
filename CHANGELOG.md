@@ -10,4 +10,6 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
+- Configure package for public npm publishing under `@modemdev/drizzle-scoped-db`.
+
 ### Fixed

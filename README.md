@@ -39,11 +39,11 @@ You can use this instead of RLS, or combine it with RLS for defense in depth. Th
 ## Install
 
 ```bash
-npm install drizzle-scoped-db drizzle-orm
+npm install @modemdev/drizzle-scoped-db drizzle-orm
 ```
 
 ```bash
-pnpm add drizzle-scoped-db drizzle-orm
+pnpm add @modemdev/drizzle-scoped-db drizzle-orm
 ```
 
 Drizzle is a peer dependency.
@@ -51,7 +51,7 @@ Drizzle is a peer dependency.
 ## Quick start
 
 ```ts
-import { createScopedDb, scopeByColumn } from "drizzle-scoped-db";
+import { createScopedDb, scopeByColumn } from "@modemdev/drizzle-scoped-db";
 import { eq } from "drizzle-orm";
 import { projects, tasks } from "./schema";
 
@@ -179,7 +179,7 @@ This mode inspects Drizzle SQL chunks to detect column references. Custom `defin
 Use `defineScopedTable` for composite scopes or predicates that are not a single equality column.
 
 ```ts
-import { createScopedDb, defineScopedTable } from "drizzle-scoped-db";
+import { createScopedDb, defineScopedTable } from "@modemdev/drizzle-scoped-db";
 import { and, eq } from "drizzle-orm";
 
 const scopedDb = createScopedDb(db, {
@@ -298,7 +298,7 @@ type ScopedTableRule<TScope, TInsert = Record<string, unknown>> = {
 Optional startup assertion for projects that rely on `requireScopeInWhere` or `containsColumnFilter`.
 
 ```ts
-import { assertDrizzleCompatibility } from "drizzle-scoped-db";
+import { assertDrizzleCompatibility } from "@modemdev/drizzle-scoped-db";
 import { eq } from "drizzle-orm";
 
 assertDrizzleCompatibility(eq(projects.workspaceId, "compat-check"), "workspace_id");

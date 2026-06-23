@@ -1,5 +1,5 @@
 {
-  "name": "drizzle-scoped-db",
+  "name": "@modemdev/drizzle-scoped-db",
   "version": "0.0.0",
   "description": "Typed tenant scoping for Drizzle ORM query builders",
   "keywords": [
@@ -34,6 +34,9 @@
       "import": "./dist/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "coverage": "vitest run --typecheck --coverage",
@@ -65,9 +68,12 @@
     "pre-commit": "npx lint-staged"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}": [
+    "*.{ts,tsx,js,jsx,mjs,cjs}": [
       "oxfmt --write",
       "oxlint --fix"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "oxfmt --write"
     ]
   },
   "engines": {
