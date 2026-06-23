@@ -8,7 +8,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
-- Collapse separate strictness options into a single `strict` configuration flag.
+- Make strict mode the default and allow opting out with `strict: false`.
 
 ### Fixed
 

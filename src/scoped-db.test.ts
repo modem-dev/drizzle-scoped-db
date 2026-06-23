@@ -217,7 +217,7 @@ function createFromBuilder(state: FakeDbState): FakeFromBuilder {
 }
 
 describe("createScopedDb", () => {
-  it("injects a declared scope predicate into select queries without requiring callers to mention the scope column", () => {
+  it("injects a declared scope predicate without requiring callers to mention the scope column when strict mode is disabled", () => {
     const rawDb = createFakeDb();
     const rules = [
       scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" }),
@@ -225,11 +225,13 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
+      strict: false,
       rules,
     });
     createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-2",
+      strict: false,
       rules,
     });
 
@@ -246,6 +248,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
+      strict: false,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -256,11 +259,10 @@ describe("createScopedDb", () => {
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(false);
   });
 
-  it("throws when a scoped select is executed without where and strict mode is enabled", () => {
+  it("throws when a scoped select is executed without where because strict mode is the default", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -280,11 +282,10 @@ describe("createScopedDb", () => {
     expect(() => query.then(() => undefined)).toThrow(MissingScopedWhereError);
   });
 
-  it("can require the caller where clause to include the declared scope column", () => {
+  it("requires the caller where clause to include the declared scope column by default", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      strict: true,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -326,6 +327,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
+      strict: false,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
     });
 
@@ -355,6 +357,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace-region",
       scopeValue: { workspaceId: "workspace-1", regionId: "us" },
+      strict: false,
       rules: [
         defineScopedTable<{ workspaceId: string; regionId: string }, typeof projectsTbl>(
           projectsTbl,
@@ -447,6 +450,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
+      strict: false,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
@@ -487,6 +491,7 @@ describe("createScopedDb", () => {
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
+      strict: false,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
     });
 
@@ -614,11 +619,12 @@ describe("createScopedDb", () => {
     ).toThrow(MissingScopedPredicateError);
   });
 
-  it("supports scope rules that sometimes do not produce a predicate", () => {
+  it("supports scope rules that sometimes do not produce a predicate when strict mode is disabled", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
+      strict: false,
       rules: [
         defineScopedTable<string, typeof projectsTbl>(projectsTbl, {
           where: () => undefined,

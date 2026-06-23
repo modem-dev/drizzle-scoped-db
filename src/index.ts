@@ -98,7 +98,10 @@ export type CreateScopedDbOptions<TScope> = {
   scopeValue: TScope;
   /** Table-specific scoping rules. Tables without rules pass through unchanged. */
   rules: ScopedTableRule<TScope>[];
-  /** Enable strict mode: callers must provide `.where(...)` and include the declared scope predicate. */
+  /**
+   * Strict mode requires callers to provide `.where(...)` and include the declared scope predicate.
+   * Defaults to `true`; pass `false` to allow implicit scope-only queries.
+   */
   strict?: boolean;
   /** Property name for the intentionally unsafe unscoped DB escape hatch. Defaults to `_unsafeUnscopedDb`. */
   unscopedDbPropertyName?: string;
@@ -411,7 +414,7 @@ function wrapRelationalMethod<TScope, TResult>(
   return (config) => {
     const originalWhere = config?.where;
 
-    if (originalWhere === undefined && options.strict) {
+    if (originalWhere === undefined && isStrictMode(options)) {
       throw createMissingWhereError(getRuleTableName(rule), options);
     }
 
@@ -628,13 +631,18 @@ function assertWhereAllowed<TScope>(
   rule: ScopedTableRule<TScope>,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): void {
-  if (!condition && options.strict) {
+  if (!condition && isStrictMode(options)) {
     throw createMissingWhereError(getRuleTableName(rule), options);
   }
 
-  if (options.strict && !rule.hasScopeInWhere?.(condition)) {
+  if (isStrictMode(options) && !rule.hasScopeInWhere?.(condition)) {
     throw createMissingScopeError(getRuleTableName(rule), options);
   }
+}
+
+/** Strict mode is enabled by default; callers must explicitly opt out. */
+function isStrictMode<TScope>(options: NormalizedCreateScopedDbOptions<TScope>): boolean {
+  return options.strict !== false;
 }
 
 /** Combine a user condition with the table's declared scope predicate. */

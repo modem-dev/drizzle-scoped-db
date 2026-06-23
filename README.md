@@ -35,9 +35,9 @@ const project = await workspaceDb
     name: projects.name,
   })
   .from(projects)
-  .where(eq(projects.id, projectId));
+  .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
 
-// Injected automatically: and(eq(projects.workspaceId, workspaceId))
+// Also injected automatically: eq(projects.workspaceId, workspaceId)
 ```
 
 That gives you a portable, typed boundary that is easy to test and works in request handlers, background jobs, workers, scripts, and apps that do not use Postgres.
@@ -60,7 +60,7 @@ Drizzle is a peer dependency.
 
 ```ts
 import { createScopedDb, scopeByColumn } from "@modemdev/drizzle-scoped-db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { projects, tasks } from "./schema";
 
 const workspaceDb = createScopedDb(db, {
@@ -72,14 +72,13 @@ const workspaceDb = createScopedDb(db, {
   ],
 });
 
-const project = await workspaceDb.select().from(projects).where(eq(projects.id, projectId));
+const project = await workspaceDb
+  .select()
+  .from(projects)
+  .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
 ```
 
-The executed query is scoped as if you wrote:
-
-```ts
-where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
-```
+The wrapper still injects the workspace predicate again as defense in depth.
 
 ## Insert validation
 
@@ -107,9 +106,14 @@ Batch inserts are validated row by row.
 Scoped predicates are injected into mutations too.
 
 ```ts
-await workspaceDb.update(tasks).set({ status: "done" }).where(eq(tasks.id, taskId));
+await workspaceDb
+  .update(tasks)
+  .set({ status: "done" })
+  .where(and(eq(tasks.id, taskId), eq(tasks.workspaceId, workspaceId)));
 
-await workspaceDb.delete(tasks).where(eq(tasks.id, taskId));
+await workspaceDb
+  .delete(tasks)
+  .where(and(eq(tasks.id, taskId), eq(tasks.workspaceId, workspaceId)));
 ```
 
 ## Relational query API
@@ -129,7 +133,8 @@ const workspaceDb = createScopedDb(db, {
 });
 
 const project = await workspaceDb.query.projects.findFirst({
-  where: (project, { eq }) => eq(project.id, projectId),
+  where: (project, { and, eq }) =>
+    and(eq(project.id, projectId), eq(project.workspaceId, workspaceId)),
   with: {
     tasks: true,
   },
@@ -140,15 +145,12 @@ Tables without a matching rule pass through unchanged.
 
 ## Strict mode
 
-The default safety mechanism is predicate injection: the wrapper adds the declared scope predicate even if the caller forgets it.
-
-Enable `strict` when you also want codebase discipline. In strict mode, scoped selects, updates, deletes, and relational queries must provide a caller `where` clause, and that `where` clause must explicitly include the declared scope predicate.
+Strict mode is enabled by default. Scoped selects, updates, deletes, and relational queries must provide a caller `where` clause, and that `where` clause must explicitly include the declared scope predicate.
 
 ```ts
 const workspaceDb = createScopedDb(db, {
   scopeName: "workspace",
   scopeValue: workspaceId,
-  strict: true,
   rules: [scopeByColumn(projects, projects.workspaceId)],
 });
 
@@ -166,6 +168,20 @@ await workspaceDb
 ```
 
 Strict mode inspects Drizzle SQL chunks to detect column references. Custom `defineScopedTable` rules must provide `hasScopeInWhere`; otherwise strict validation fails because the wrapper has no safe way to prove the caller supplied the scope predicate.
+
+Opt out with `strict: false` if you want pure predicate injection without requiring callers to write the scope predicate themselves:
+
+```ts
+const workspaceDb = createScopedDb(db, {
+  scopeName: "workspace",
+  scopeValue: workspaceId,
+  strict: false,
+  rules: [scopeByColumn(projects, projects.workspaceId)],
+});
+
+await workspaceDb.select().from(projects).where(eq(projects.id, projectId));
+// Executes with: and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId))
+```
 
 ## Custom scope rules
 
@@ -250,7 +266,7 @@ type CreateScopedDbOptions<TScope> = {
   scopeName: string;
   scopeValue: TScope;
   rules: ScopedTableRule<TScope>[];
-  strict?: boolean;
+  strict?: boolean; // defaults to true
   unscopedDbPropertyName?: string; // defaults to '_unsafeUnscopedDb'
   scopeValueProperty?: string;
   toJSON?: (scopeValue: TScope, scopeName: string) => unknown;
