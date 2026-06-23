@@ -2,25 +2,22 @@
 
 Typed tenant scoping for Drizzle ORM query builders.
 
-`drizzle-scoped-db` lets you create scoped Drizzle database handles such as `tenantDb`, `workspaceDb`, or `organizationDb`. Queries made through that handle automatically receive the declared scope predicates, and scoped inserts are validated before they reach the database.
+`drizzle-scoped-db` creates scoped Drizzle handles such as `tenantDb`, `workspaceDb`, or `organizationDb`. Scoped handles keep the tenant boundary visible in TypeScript, validate scoped inserts, and fail loudly when strict-mode queries omit the tenant predicate.
 
-Think of it as a typed, application-layer alternative to Row Level Security (RLS): instead of relying on database session state and policies, you pass a scoped DB capability through your TypeScript code.
+It is not database-enforced Row Level Security (RLS), though the two can be used together.
 
 ## Why use it
 
-- Create a scoped DB handle once per request, job, or tenant context.
+- Pass typed scoped DB handles instead of the raw DB.
 - Declare scoping rules once per table.
-- Automatically inject scope predicates into `select`, joined tables with rules, `update`, `delete`, and relational `findFirst` / `findMany` queries.
+- Strict mode by default: missing `where` or missing scope predicate throws.
+- Inject scope predicates into supported selects, joins, mutations, and relational root queries.
 - Validate scoped inserts before they reach the database.
-- Model any scope shape: one column, different columns per table, composite predicates, or custom validators.
-- Keep the tenant boundary visible in TypeScript by passing scoped DB handles instead of the raw DB.
-- Work across Drizzle drivers that expose the standard query-builder APIs.
+- Catch missing predicates in human-written, generated, or agent-authored code.
 
-## RLS vs scoped DB handles
+## How this relates to RLS
 
-Database-native RLS is a good fit when you want the database to enforce tenant isolation for every SQL statement, including arbitrary raw SQL. It also comes with operational constraints: database support, policy authoring, session variables, connection-pool behavior, migrations, and test setup.
-
-`drizzle-scoped-db` takes a different approach. It makes tenant isolation an explicit application capability:
+RLS is enforced by the database. `drizzle-scoped-db` is enforced by the application path: tenant-scoped code receives a scoped Drizzle handle instead of the raw DB. It focuses on typed query builders, explicit scoped capabilities, and loud failures when predicates are missing.
 
 ```ts
 const workspaceDb = createScopedDb(db, {
@@ -40,9 +37,15 @@ const project = await workspaceDb
 // Also injected automatically: eq(projects.workspaceId, workspaceId)
 ```
 
-That gives you a portable, typed boundary that is easy to test and works in request handlers, background jobs, workers, scripts, and apps that do not use Postgres.
+Conceptually, strict mode makes scoped reads look like this:
 
-You can use this instead of RLS, or combine it with RLS for defense in depth. The important rule is simple: application code that should be tenant-scoped should receive the scoped DB handle, not the original unscoped Drizzle instance.
+```sql
+WHERE projects.id = projectId
+  AND projects.tenant_id = tenantId -- caller wrote this; strict mode checks it
+  AND projects.tenant_id = tenantId -- wrapper injects this again
+```
+
+Application code that should be tenant-scoped should receive the scoped DB handle, not the raw Drizzle instance. RLS and scoped handles are not mutually exclusive; use both when you want typed app boundaries plus database-level enforcement outside the query-builder path.
 
 ## Install
 
@@ -157,11 +160,49 @@ const project = await workspaceDb.query.projects.findFirst({
 
 Tables without a matching rule pass through unchanged.
 
-Relational `with` entries are still Drizzle relation configs, not explicit join builder calls. Root `findFirst` / `findMany` queries are scoped; nested relation safety should come from tenant-safe relationships, explicit relation filters where Drizzle supports them, or database constraints.
+Relational `with` entries are root-only today: `findFirst` / `findMany` are scoped, but nested relation rows rely on tenant-safe relationships, explicit relation filters, or database constraints.
+
+## Data model shape
+
+This package works best when tenant ownership is represented in your schema:
+
+- tenant/scope columns on tenant-owned tables
+- scoped rules for protected tables
+- indexes for scoped access paths, e.g. `(tenant_id, id)` and `(tenant_id, foreign_id)`
+- globally unique IDs or constraints that reject invalid cross-tenant references
+
+Write rules explicitly for small schemas, or generate them once from schema metadata in an app-specific facade.
+
+Explicit rules:
+
+```ts
+const rules = [
+  scopeByColumn(projects, projects.tenantId, { insertKey: "tenantId" }),
+  scopeByColumn(tasks, tasks.tenantId, { insertKey: "tenantId" }),
+  scopeByColumn(comments, comments.tenantId, { insertKey: "tenantId" }),
+];
+```
+
+Generated rules:
+
+```ts
+const tenantScopedRules = Object.values(schema)
+  .filter((table) => isDrizzleTable(table) && "tenantId" in table)
+  .map((table) =>
+    scopeByColumn(table, table.tenantId, {
+      insertKey: "tenantId",
+      columnName: "tenant_id",
+    }),
+  );
+```
+
+With either shape, the wrapper can scope root tables and joined tables with rules. Your schema still owns data consistency, such as preventing a task in one tenant from referencing another tenant's project.
 
 ## Strict mode
 
-Strict mode is enabled by default. Scoped selects, updates, deletes, and relational queries must provide a caller `where` clause, and that `where` clause must explicitly include the declared scope predicate.
+Strict mode is enabled by default and intended for most app code. Scoped selects, updates, deletes, and relational queries must include a `where` clause with the declared scope predicate.
+
+This is intentionally not magic: callers write the tenant predicate, the wrapper verifies it, then injects it again. If generated code, agent-authored code, or a rushed refactor forgets the predicate, the query throws.
 
 ```ts
 const workspaceDb = createScopedDb(db, {
@@ -183,9 +224,7 @@ await workspaceDb
   .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
 ```
 
-Strict mode inspects Drizzle SQL chunks to detect column references. Custom `defineScopedTable` rules must provide `hasScopeInWhere`; otherwise strict validation fails because the wrapper has no safe way to prove the caller supplied the scope predicate.
-
-Opt out with `strict: false` if you want pure predicate injection without requiring callers to write the scope predicate themselves:
+Custom `defineScopedTable` rules need `hasScopeInWhere` for strict validation. Opt out with `strict: false` if you want pure predicate injection:
 
 ```ts
 const workspaceDb = createScopedDb(db, {
@@ -223,7 +262,7 @@ const scopedDb = createScopedDb(db, {
 
 ## Security model
 
-`drizzle-scoped-db` protects queries that go through the scoped wrapper. It is designed to make the safe path the normal path: pass scoped DB handles to tenant-scoped application code.
+`drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
 
 The wrapper intentionally exposes the original unscoped DB as a loud escape hatch:
 
@@ -233,19 +272,18 @@ workspaceDb._unsafeUnscopedDb;
 
 Use it for migrations, admin jobs, test setup, cross-tenant maintenance, or unsupported query shapes. Queries through this property are not scoped.
 
-For select joins built with `.leftJoin(...)` or `.innerJoin(...)`, every joined table with a declared rule gets its own injected scope predicate in the join condition. Joined tables without rules pass through unchanged.
+The wrapper scopes supported selects, joins, mutations, root relational queries, and validated inserts. The schema shape in [Data model shape](#data-model-shape) still matters: your data model needs ownership columns, indexes, and relationship invariants that match how your app scopes data.
 
 Not protected:
 
-- raw SQL executed through the original DB
-- queries run through `_unsafeUnscopedDb`
-- custom helpers that close over the original unscoped DB
+- raw SQL, `_unsafeUnscopedDb`, or helpers that close over the raw DB
 - query builder methods not wrapped by this package
-- joined tables without declared rules
-- nested relational `with` rows whose tenant safety is not enforced by relationships, explicit filters, or database constraints
-- code that deliberately bypasses the scoped DB capability
+- tables or joined tables without rules
+- nested relational `with` rows unless your relationships, filters, or constraints enforce tenant safety
+- invalid cross-tenant rows that your database constraints allow
+- deliberate bypasses of the scoped DB capability
 
-If your threat model includes arbitrary raw SQL execution, compromised application code, or direct database access outside your app, use database-native controls as well.
+RLS, database permissions, and other database-native controls can be layered with scoped handles when you need enforcement outside the typed application query-builder path.
 
 ## Dialect support
 
