@@ -1,5 +1,7 @@
-import { and, type Column, eq, or, type SQL } from "drizzle-orm";
+import { and, type Column, eq, or, relations, type SQL } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
+import { drizzle as drizzleSqliteProxy } from "drizzle-orm/sqlite-proxy";
+import { sqliteTable, text as sqliteText } from "drizzle-orm/sqlite-core";
 import {
   assertDrizzleCompatibility,
   containsColumnFilter,
@@ -9,6 +11,7 @@ import {
   MissingScopedPredicateError,
   MissingScopedWhereError,
   scopeByColumn,
+  UnsupportedRelationalWithError,
 } from "./index";
 
 const projectsTbl = pgTable("projects", {
@@ -30,6 +33,48 @@ const usersTbl = pgTable("users", {
   email: text("email").notNull(),
 });
 
+const sqliteWorkspacesTbl = sqliteTable("workspaces", {
+  id: sqliteText("id").primaryKey(),
+  tenantId: sqliteText("tenant_id").notNull(),
+});
+
+const sqliteProjectsTbl = sqliteTable("projects", {
+  id: sqliteText("id").primaryKey(),
+  tenantId: sqliteText("tenant_id").notNull(),
+  workspaceId: sqliteText("workspace_id").notNull(),
+});
+
+const sqliteTasksTbl = sqliteTable("tasks", {
+  id: sqliteText("id").primaryKey(),
+  tenantId: sqliteText("tenant_id").notNull(),
+  projectId: sqliteText("project_id").notNull(),
+});
+
+const sqliteProjectRelations = relations(sqliteProjectsTbl, ({ many, one }) => ({
+  tasks: many(sqliteTasksTbl),
+  workspace: one(sqliteWorkspacesTbl, {
+    fields: [sqliteProjectsTbl.workspaceId],
+    references: [sqliteWorkspacesTbl.id],
+  }),
+}));
+
+const sqliteTaskRelations = relations(sqliteTasksTbl, ({ one }) => ({
+  project: one(sqliteProjectsTbl, {
+    fields: [sqliteTasksTbl.projectId],
+    references: [sqliteProjectsTbl.id],
+  }),
+}));
+
+const sqliteWorkspaceRelations = relations(sqliteWorkspacesTbl, ({ many }) => ({
+  projects: many(sqliteProjectsTbl),
+}));
+
+type SqliteProxyCall = {
+  sql: string;
+  params: unknown[];
+  method: "run" | "all" | "values" | "get";
+};
+
 type FakeDbState = {
   selectCondition?: SQL;
   joinConditions?: SQL[];
@@ -37,12 +82,27 @@ type FakeDbState = {
   updateCondition?: SQL;
   deleteCondition?: SQL;
   relationalCondition?: SQL;
+  relationalWithConfig?: unknown;
+  nestedRelationalCondition?: SQL;
   transactionRawDb?: FakeDb;
 };
 
-type RelationalProjectWhere =
+type RelationalWhereFor<TTable> =
   | SQL
-  | ((table: typeof projectsTbl, operators: typeof relationalOperators) => SQL | undefined);
+  | ((table: TTable, operators: typeof relationalOperators) => SQL | undefined);
+
+type RelationalTaskConfig = {
+  where?: RelationalWhereFor<typeof tasksTbl>;
+  with?: Record<string, true | RelationalTaskConfig>;
+};
+
+type RelationalProjectConfig = {
+  where?: RelationalWhereFor<typeof projectsTbl>;
+  with?: {
+    tasks?: true | RelationalTaskConfig;
+    [key: string]: true | RelationalTaskConfig | undefined;
+  };
+};
 
 type FakeWhereResult = {
   condition: SQL | undefined;
@@ -64,12 +124,8 @@ type FakeSelectBuilder = {
 type FakeDb = {
   query: {
     projects: {
-      findFirst(config?: {
-        where?: RelationalProjectWhere;
-      }): Promise<{ condition: SQL | undefined }>;
-      findMany(config?: {
-        where?: RelationalProjectWhere;
-      }): Promise<{ condition: SQL | undefined }[]>;
+      findFirst(config?: RelationalProjectConfig): Promise<{ condition: SQL | undefined }>;
+      findMany(config?: RelationalProjectConfig): Promise<{ condition: SQL | undefined }[]>;
     };
     users: {
       findMany(config?: { limit?: number }): Promise<{ config: { limit?: number } | undefined }[]>;
@@ -97,17 +153,70 @@ type FakeDb = {
   _state: FakeDbState;
 };
 
+/** Creates a real Drizzle SQLite proxy DB to smoke-test relational query SQL generation. */
+function createSqliteRelationalSmokeDb(calls: SqliteProxyCall[] = []) {
+  const db = drizzleSqliteProxy(
+    async (sql, params, method) => {
+      calls.push({ sql, params, method });
+      return { rows: [] };
+    },
+    {
+      schema: {
+        projects: sqliteProjectsTbl,
+        tasks: sqliteTasksTbl,
+        workspaces: sqliteWorkspacesTbl,
+        projectRelations: sqliteProjectRelations,
+        taskRelations: sqliteTaskRelations,
+        workspaceRelations: sqliteWorkspaceRelations,
+      },
+    },
+  );
+
+  const taskRule = scopeByColumn(sqliteTasksTbl, sqliteTasksTbl.tenantId, {
+    queryName: "tasks",
+    insertKey: "tenantId",
+    columnName: "tenant_id",
+  });
+  const workspaceRule = scopeByColumn(sqliteWorkspacesTbl, sqliteWorkspacesTbl.tenantId, {
+    queryName: "workspaces",
+    insertKey: "tenantId",
+    columnName: "tenant_id",
+  });
+  const projectRule = scopeByColumn(sqliteProjectsTbl, sqliteProjectsTbl.tenantId, {
+    queryName: "projects",
+    insertKey: "tenantId",
+    columnName: "tenant_id",
+    relations: {
+      tasks: taskRule,
+      workspace: workspaceRule,
+    },
+  });
+
+  return { db, projectRule, taskRule, workspaceRule };
+}
+
+function getLastSqliteProxyCall(calls: SqliteProxyCall[]): SqliteProxyCall {
+  const lastCall = calls[calls.length - 1];
+  if (!lastCall) {
+    throw new Error("Expected a sqlite proxy call to be recorded.");
+  }
+
+  return lastCall;
+}
+
 /** Creates a minimal Drizzle-like DB that records the predicates passed into query builders. */
 function createFakeDb(state: FakeDbState = {}): FakeDb {
   const db = {
     query: {
       projects: {
-        async findFirst(config?: { where?: RelationalProjectWhere }) {
-          state.relationalCondition = resolveRelationalWhere(config?.where);
+        async findFirst(config?: RelationalProjectConfig) {
+          state.relationalCondition = resolveRelationalWhere(config?.where, projectsTbl);
+          recordNestedRelationalConfig(config, state);
           return { condition: state.relationalCondition };
         },
-        async findMany(config?: { where?: RelationalProjectWhere }) {
-          state.relationalCondition = resolveRelationalWhere(config?.where);
+        async findMany(config?: RelationalProjectConfig) {
+          state.relationalCondition = resolveRelationalWhere(config?.where, projectsTbl);
+          recordNestedRelationalConfig(config, state);
           return [{ condition: state.relationalCondition }];
         },
       },
@@ -177,13 +286,23 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
 const relationalOperators = { and, eq, or };
 
 /** Resolve the where shape that Drizzle relational queries accept. */
-function resolveRelationalWhere(
-  where:
-    | SQL
-    | ((table: typeof projectsTbl, operators: typeof relationalOperators) => SQL | undefined)
-    | undefined,
+function resolveRelationalWhere<TTable>(
+  where: RelationalWhereFor<TTable> | undefined,
+  table: TTable,
 ): SQL | undefined {
-  return typeof where === "function" ? where(projectsTbl, relationalOperators) : where;
+  return typeof where === "function" ? where(table, relationalOperators) : where;
+}
+
+/** Records the nested task relation predicate that the scoped relational wrapper sends to Drizzle. */
+function recordNestedRelationalConfig(
+  config: RelationalProjectConfig | undefined,
+  state: FakeDbState,
+): void {
+  state.relationalWithConfig = config?.with;
+  const tasksConfig = config?.with?.tasks;
+  if (tasksConfig && tasksConfig !== true) {
+    state.nestedRelationalCondition = resolveRelationalWhere(tasksConfig.where, tasksTbl);
+  }
 }
 
 /** Creates a minimal select builder with join and where methods. */
@@ -360,6 +479,174 @@ describe("createScopedDb", () => {
     await expect(scopedDb.query.users.findMany({ limit: 5 })).resolves.toEqual([
       { config: { limit: 5 } },
     ]);
+  });
+
+  it("keeps relational with root-only by default", async () => {
+    const rawDb = createFakeDb();
+    const taskRule = scopeByColumn(tasksTbl, tasksTbl.taskWorkspaceId, { queryName: "tasks" });
+    const projectRule = scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+      queryName: "projects",
+      relations: { tasks: taskRule },
+    });
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [projectRule, taskRule],
+    });
+
+    await scopedDb.query.projects.findFirst({
+      where: (project, { eq }) => eq(project.id, "project-1"),
+      with: { tasks: true },
+    });
+
+    expect(rawDb._state.relationalCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.relationalCondition, "workspace_id")).toBe(true);
+    expect(rawDb._state.relationalWithConfig).toEqual({ tasks: true });
+    expect(rawDb._state.nestedRelationalCondition).toBeUndefined();
+  });
+
+  it("can recursively scope configured relational with entries in scope mode", async () => {
+    const rawDb = createFakeDb();
+    const taskRule = scopeByColumn(tasksTbl, tasksTbl.taskWorkspaceId, { queryName: "tasks" });
+    const projectRule = scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+      queryName: "projects",
+      relations: { tasks: taskRule },
+    });
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      relationalWithMode: "scope",
+      strict: false,
+      rules: [projectRule, taskRule],
+    });
+
+    await scopedDb.query.projects.findFirst({
+      where: (project, { eq }) => eq(project.id, "project-1"),
+      with: { tasks: true },
+    });
+
+    expect(rawDb._state.relationalCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.relationalCondition, "workspace_id")).toBe(true);
+    expect(rawDb._state.nestedRelationalCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.nestedRelationalCondition, "task_workspace_id")).toBe(
+      true,
+    );
+  });
+
+  it("combines existing nested relational with where clauses with nested scope predicates", async () => {
+    const rawDb = createFakeDb();
+    const taskRule = scopeByColumn(tasksTbl, tasksTbl.taskWorkspaceId, { queryName: "tasks" });
+    const projectRule = scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+      queryName: "projects",
+      relations: { tasks: "tasks" },
+    });
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      relationalWithMode: "scope",
+      strict: false,
+      rules: [projectRule, taskRule],
+    });
+
+    await scopedDb.query.projects.findMany({
+      where: (project, { eq }) => eq(project.id, "project-1"),
+      with: {
+        tasks: {
+          where: (task, { eq }) => eq(task.title, "Launch"),
+        },
+      },
+    });
+
+    expect(rawDb._state.nestedRelationalCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.nestedRelationalCondition, "title")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.nestedRelationalCondition, "task_workspace_id")).toBe(
+      true,
+    );
+  });
+
+  it("throws for unmapped relational with entries in scope mode", () => {
+    const scopedDb = createScopedDb(createFakeDb(), {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      relationalWithMode: "scope",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    expect(() =>
+      scopedDb.query.projects.findFirst({
+        where: (project, { eq }) => eq(project.id, "project-1"),
+        with: { tasks: true },
+      }),
+    ).toThrow(UnsupportedRelationalWithError);
+  });
+
+  it("throws for any relational with entries in forbid mode", () => {
+    const scopedDb = createScopedDb(createFakeDb(), {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      relationalWithMode: "forbid",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    expect(() =>
+      scopedDb.query.projects.findFirst({
+        where: (project, { eq }) => eq(project.id, "project-1"),
+        with: { tasks: true },
+      }),
+    ).toThrow(UnsupportedRelationalWithError);
+  });
+
+  it("scopes real Drizzle SQLite many relation with configs", async () => {
+    const calls: SqliteProxyCall[] = [];
+    const { db, projectRule, taskRule, workspaceRule } = createSqliteRelationalSmokeDb(calls);
+    const scopedDb = createScopedDb(db, {
+      scopeName: "tenant",
+      scopeValue: "tenant-1",
+      relationalWithMode: "scope",
+      rules: [projectRule, taskRule, workspaceRule],
+    });
+
+    await scopedDb.query.projects.findMany({
+      where: (project, { and, eq }) =>
+        and(eq(project.id, "project-1"), eq(project.tenantId, "tenant-1")),
+      with: {
+        tasks: true,
+      },
+    });
+
+    const query = getLastSqliteProxyCall(calls);
+    expect(query.sql).toContain('from "tasks" "projects_tasks"');
+    expect(query.sql).toContain('"projects_tasks"."tenant_id" = ?');
+    expect(query.sql).toContain('"projects"."tenant_id" = ?');
+    expect(query.params).toEqual(["tenant-1", "project-1", "tenant-1", "tenant-1"]);
+  });
+
+  it("scopes real Drizzle SQLite one relation with configs", async () => {
+    const calls: SqliteProxyCall[] = [];
+    const { db, projectRule, taskRule, workspaceRule } = createSqliteRelationalSmokeDb(calls);
+    const scopedDb = createScopedDb(db, {
+      scopeName: "tenant",
+      scopeValue: "tenant-1",
+      relationalWithMode: "scope",
+      rules: [projectRule, taskRule, workspaceRule],
+    });
+
+    await scopedDb.query.projects.findMany({
+      where: (project, { and, eq }) =>
+        and(eq(project.id, "project-1"), eq(project.tenantId, "tenant-1")),
+      with: {
+        workspace: true,
+      },
+    });
+
+    const query = getLastSqliteProxyCall(calls);
+    expect(query.sql).toContain('from "workspaces" "projects_workspace"');
+    expect(query.sql).toContain('"projects_workspace"."tenant_id" = ?');
+    expect(query.sql).toContain('"projects"."tenant_id" = ?');
+    expect(query.params).toEqual(["tenant-1", 1, "project-1", "tenant-1", "tenant-1"]);
   });
 
   it("supports custom composite scope rules", () => {

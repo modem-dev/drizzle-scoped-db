@@ -55,6 +55,20 @@ export class InvalidScopedInsertError extends Error {
   }
 }
 
+/** Error thrown when relational `with` cannot be safely handled under the configured mode. */
+export class UnsupportedRelationalWithError extends Error {
+  constructor(scopeName: string, tableName: string, relationName?: string) {
+    const relationMessage = relationName ? ` relation "${relationName}"` : "";
+    super(
+      `Relational with${relationMessage} on table "${tableName}" is not configured for ${scopeName} scoping.`,
+    );
+    this.name = "UnsupportedRelationalWithError";
+  }
+}
+
+/** Relational `with` handling strategy. */
+export type RelationalWithMode = "root-only" | "scope" | "forbid";
+
 /** A table-specific scoping rule. */
 export type ScopedTableRule<
   TScope,
@@ -76,6 +90,8 @@ export type ScopedTableRule<
    * Required when `strict` mode is enabled; rules without a detector fail strict validation.
    */
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
+  /** Experimental relation-name to scoped-rule map for recursively scoping Drizzle relational `with`. */
+  relations?: Record<string, ScopedTableRule<TScope> | string>;
 };
 
 /** Error customization hooks for scoped wrappers. */
@@ -105,6 +121,8 @@ export type CreateScopedDbOptions<TScope> = {
   strict?: boolean;
   /** Property name for the intentionally unsafe unscoped DB escape hatch. Defaults to `_unsafeUnscopedDb`. */
   unscopedDbPropertyName?: string;
+  /** Experimental relational `with` handling. Defaults to `root-only` for backward compatibility. */
+  relationalWithMode?: RelationalWithMode;
   /** Optional property name that exposes the current scope value. */
   scopeValueProperty?: string;
   /** Optional custom JSON serialization hook. */
@@ -140,6 +158,8 @@ type DrizzleLikeDb = {
 export type ScopeByColumnOptions<TScope> = {
   /** Optional db.query property name for relational query API support. */
   queryName?: string;
+  /** Experimental relation-name to scoped-rule map for recursively scoping Drizzle relational `with`. */
+  relations?: Record<string, ScopedTableRule<TScope> | string>;
   /** Human-readable table name used in errors. */
   tableName?: string;
   /** Insert row property that should equal the current scope value. */
@@ -162,6 +182,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
   return {
     table,
     queryName: options.queryName,
+    relations: options.relations,
     tableName: options.tableName,
     where: (scopeValue) => eq(column as Parameters<typeof eq>[0], scopeValue),
     validateInsert: options.insertKey
@@ -227,9 +248,9 @@ type RuleIndexes<TScope> = {
 };
 
 type NormalizedCreateScopedDbOptions<TScope> = Required<
-  Pick<CreateScopedDbOptions<TScope>, "unscopedDbPropertyName">
+  Pick<CreateScopedDbOptions<TScope>, "unscopedDbPropertyName" | "relationalWithMode">
 > &
-  Omit<CreateScopedDbOptions<TScope>, "unscopedDbPropertyName"> &
+  Omit<CreateScopedDbOptions<TScope>, "unscopedDbPropertyName" | "relationalWithMode"> &
   RuleIndexes<TScope>;
 
 const ruleIndexCache = new WeakMap<ScopedTableRule<unknown>[], RuleIndexes<unknown>>();
@@ -243,6 +264,7 @@ function normalizeOptions<TScope>(
   return {
     ...options,
     unscopedDbPropertyName: options.unscopedDbPropertyName ?? "_unsafeUnscopedDb",
+    relationalWithMode: options.relationalWithMode ?? "root-only",
     ...ruleIndexes,
   };
 }
@@ -414,34 +436,101 @@ function createScopedTableQuery<
   } as TTableQuery;
 }
 
+/** Minimal relational query config shape shared by root and nested Drizzle relation queries. */
+type RelationalQueryConfig = {
+  where?: RelationalWhere<unknown>;
+  with?: Record<string, true | RelationalQueryConfig>;
+  [key: string]: unknown;
+};
+
 /** Wrap a relational query method to validate and inject scoped predicates. */
 function wrapRelationalMethod<TScope, TResult>(
-  originalMethod: (config?: {
-    where?: RelationalWhere<unknown>;
-    [key: string]: unknown;
-  }) => Promise<TResult>,
+  originalMethod: (config?: RelationalQueryConfig) => Promise<TResult>,
   rule: ScopedTableRule<TScope>,
   options: NormalizedCreateScopedDbOptions<TScope>,
-): (config?: { where?: RelationalWhere<unknown>; [key: string]: unknown }) => Promise<TResult> {
+): (config?: RelationalQueryConfig) => Promise<TResult> {
   return (config) => {
-    const originalWhere = config?.where;
+    return originalMethod(scopeRelationalConfig(config, rule, options, { strict: true }));
+  };
+}
 
-    if (originalWhere === undefined && isStrictMode(options)) {
-      throw createMissingWhereError(getRuleTableName(rule), options);
+/** Scope a Drizzle relational query config and optionally recurse through configured `with` relations. */
+function scopeRelationalConfig<TScope>(
+  config: RelationalQueryConfig | undefined,
+  rule: ScopedTableRule<TScope>,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+  validation: { strict: boolean },
+): RelationalQueryConfig {
+  const originalWhere = config?.where;
+
+  if (validation.strict && originalWhere === undefined && isStrictMode(options)) {
+    throw createMissingWhereError(getRuleTableName(rule), options);
+  }
+
+  const wrappedWhere: RelationalWhereCallback<unknown> = (table, operators) => {
+    const userCondition =
+      typeof originalWhere === "function" ? originalWhere(table, operators) : originalWhere;
+    if (validation.strict) {
+      assertWhereAllowed(userCondition, rule, options);
+    }
+    return scopeCondition(userCondition, rule, options);
+  };
+
+  const scopedConfig: RelationalQueryConfig = {
+    ...config,
+    where: wrappedWhere,
+  };
+
+  if (config?.with !== undefined) {
+    scopedConfig.with = scopeRelationalWith(config.with, rule, options);
+  }
+
+  return scopedConfig;
+}
+
+/** Scope or reject relational `with` entries according to the configured mode. */
+function scopeRelationalWith<TScope>(
+  withConfig: Record<string, true | RelationalQueryConfig>,
+  parentRule: ScopedTableRule<TScope>,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): Record<string, true | RelationalQueryConfig> {
+  if (options.relationalWithMode === "root-only") {
+    return withConfig;
+  }
+
+  const parentTableName = getRuleTableName(parentRule);
+  if (options.relationalWithMode === "forbid") {
+    throw new UnsupportedRelationalWithError(options.scopeName, parentTableName);
+  }
+
+  const scopedWith: Record<string, true | RelationalQueryConfig> = {};
+  for (const [relationName, relationConfig] of Object.entries(withConfig)) {
+    const relationRule = resolveRelationRule(parentRule.relations?.[relationName], options);
+    if (!relationRule) {
+      throw new UnsupportedRelationalWithError(options.scopeName, parentTableName, relationName);
     }
 
-    const wrappedWhere: RelationalWhereCallback<unknown> = (table, operators) => {
-      const userCondition =
-        typeof originalWhere === "function" ? originalWhere(table, operators) : originalWhere;
-      assertWhereAllowed(userCondition, rule, options);
-      return scopeCondition(userCondition, rule, options);
-    };
+    scopedWith[relationName] = scopeRelationalConfig(
+      relationConfig === true ? undefined : relationConfig,
+      relationRule,
+      options,
+      { strict: false },
+    );
+  }
 
-    return originalMethod({
-      ...config,
-      where: wrappedWhere,
-    });
-  };
+  return scopedWith;
+}
+
+/** Resolve a relation rule by inline rule or relational query name. */
+function resolveRelationRule<TScope>(
+  relationRule: ScopedTableRule<TScope> | string | undefined,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): ScopedTableRule<TScope> | undefined {
+  if (typeof relationRule === "string") {
+    return options.rulesByQueryName.get(relationRule);
+  }
+
+  return relationRule;
 }
 
 /** Create an insert builder that validates scoped values. */
