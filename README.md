@@ -29,7 +29,15 @@ const workspaceDb = createScopedDb(db, {
   rules,
 });
 
-await loadProject(workspaceDb, projectId);
+const project = await workspaceDb
+  .select({
+    id: projects.id,
+    name: projects.name,
+  })
+  .from(projects)
+  .where(eq(projects.id, projectId));
+
+// Injected automatically: and(eq(projects.workspaceId, workspaceId))
 ```
 
 That gives you a portable, typed boundary that is easy to test and works in request handlers, background jobs, workers, scripts, and apps that do not use Postgres.
@@ -322,6 +330,18 @@ pnpm coverage
 ```
 
 The package has 100% statement, branch, function, and line coverage.
+
+## Sponsor
+
+Sponsored by [Modem](https://modem.dev?utm_source=github&utm_medium=oss&utm_campaign=oss_drizzle_scoped_db&utm_content=readme_footer).
+
+<a href="https://modem.dev?utm_source=github&utm_medium=oss&utm_campaign=oss_drizzle_scoped_db&utm_content=readme_footer">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://modem.dev/images/logo/svg/modem-combined-white.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://modem.dev/images/logo/svg/modem-combined-black.svg">
+    <img src="https://modem.dev/images/logo/svg/modem-combined-black.svg" alt="Modem" width="220">
+  </picture>
+</a>
 
 ## License
 
