@@ -10,6 +10,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
+- Expand README and security policy guidance around guardrails, RLS, schema requirements, and tenant-safe data models.
 - Make strict mode the default and allow opting out with `strict: false`.
 
 ### Fixed
