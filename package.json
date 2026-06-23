@@ -1,0 +1,77 @@
+{
+  "name": "drizzle-scoped-db",
+  "version": "0.0.0",
+  "description": "Typed tenant scoping for Drizzle ORM query builders",
+  "keywords": [
+    "drizzle",
+    "drizzle-orm",
+    "multi-tenant",
+    "rls",
+    "tenant",
+    "typescript"
+  ],
+  "homepage": "https://github.com/modem-dev/drizzle-scoped-db#readme",
+  "bugs": {
+    "url": "https://github.com/modem-dev/drizzle-scoped-db/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/modem-dev/drizzle-scoped-db.git"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "coverage": "vitest run --typecheck --coverage",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix",
+    "prepare": "simple-git-hooks",
+    "prepublishOnly": "pnpm test && pnpm coverage && pnpm build",
+    "test": "vitest run --typecheck",
+    "test:watch": "vitest --watch --typecheck",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@vitest/coverage-v8": "^4.1.9",
+    "drizzle-orm": "^0.45.2",
+    "lint-staged": "^17.0.8",
+    "oxfmt": "^0.56.0",
+    "oxlint": "^1.71.0",
+    "simple-git-hooks": "^2.13.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.45.2"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,mjs,cjs,json,md,yml,yaml}": [
+      "oxfmt --write",
+      "oxlint --fix"
+    ]
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.24.0"
+}
