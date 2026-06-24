@@ -67,7 +67,8 @@ jobs:
           JS
       - name: Verify npm peer resolution with Drizzle 1.0 rc
         run: |
-          tarball="$(npm pack --ignore-scripts --silent)"
+          tarball="$(npm pack --ignore-scripts --silent | tail -n 1)"
           app_dir="$(mktemp -d)"
-          npm --prefix "$app_dir" init -y
-          npm --prefix "$app_dir" install "$PWD/$tarball" drizzle-orm@1.0.0-rc.3 --ignore-scripts --no-audit --no-fund
+          cd "$app_dir"
+          npm init -y
+          npm install "$GITHUB_WORKSPACE/$tarball" drizzle-orm@1.0.0-rc.3 --ignore-scripts --no-audit --no-fund
