@@ -28,7 +28,7 @@ jobs:
       - run: pnpm build
       - run: npm pack --dry-run
 
-  drizzle-rc-compat:
+  drizzle-rc-validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +38,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm add --save-dev drizzle-orm@1.0.0-rc.3 --ignore-scripts
+      - run: pnpm add --save-dev drizzle-orm@rc --ignore-scripts
+      - run: pnpm format:check
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm coverage
       - run: pnpm build
+      - run: npm pack --dry-run
       - name: Smoke test Drizzle 1.0 rc compatibility
         run: |
           node --input-type=module <<'JS'
@@ -71,4 +75,4 @@ jobs:
           app_dir="$(mktemp -d)"
           cd "$app_dir"
           npm init -y
-          npm install "$GITHUB_WORKSPACE/$tarball" drizzle-orm@1.0.0-rc.3 --ignore-scripts --no-audit --no-fund
+          npm install "$GITHUB_WORKSPACE/$tarball" drizzle-orm@rc --ignore-scripts --no-audit --no-fund
