@@ -62,7 +62,7 @@
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
-    "drizzle-orm": ">=0.45.2"
+    "drizzle-orm": ">=0.45.2 || >=1.0.0-rc.0"
   },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged"
