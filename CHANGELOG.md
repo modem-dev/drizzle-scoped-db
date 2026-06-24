@@ -11,6 +11,7 @@ All notable user-visible changes to this project are documented in this file.
 ### Changed
 
 - Expand README and security policy guidance around guardrails, RLS, schema requirements, and tenant-safe data models.
+- Lead the README with a pain-focused hook, a TL;DR, badges, and a "Where this fits" positioning table comparing app-layer scoping against RLS, schema-per-tenant, proxy, and DB-vendor approaches.
 - Make strict mode the default and allow opting out with `strict: false`.
 
 ### Fixed
