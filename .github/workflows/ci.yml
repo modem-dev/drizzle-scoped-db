@@ -11,7 +11,16 @@ concurrency:
 
 jobs:
   validate:
+    name: validate (${{ matrix.drizzle_label }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - drizzle_label: locked
+            drizzle_install: ""
+          - drizzle_label: rc
+            drizzle_install: drizzle-orm@rc
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -20,25 +29,9 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm format:check
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm coverage
-      - run: pnpm build
-      - run: npm pack --dry-run
-
-  drizzle-rc-validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm add --save-dev drizzle-orm@rc --ignore-scripts
+      - name: Use Drizzle ORM ${{ matrix.drizzle_install }}
+        if: matrix.drizzle_install != ''
+        run: pnpm add --save-dev ${{ matrix.drizzle_install }} --ignore-scripts
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
@@ -47,6 +40,7 @@ jobs:
       - run: pnpm build
       - run: npm pack --dry-run
       - name: Smoke test Drizzle 1.0 rc compatibility
+        if: matrix.drizzle_label == 'rc'
         run: |
           node --input-type=module <<'JS'
           import { eq } from "drizzle-orm";
@@ -70,6 +64,7 @@ jobs:
           }
           JS
       - name: Verify npm peer resolution with Drizzle 1.0 rc
+        if: matrix.drizzle_label == 'rc'
         run: |
           tarball="$(npm pack --ignore-scripts --silent | tail -n 1)"
           app_dir="$(mktemp -d)"
