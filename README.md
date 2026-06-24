@@ -7,10 +7,10 @@
 
 **One forgotten `WHERE tenant_id = ...` leaks another tenant's rows. `drizzle-scoped-db` makes that mistake throw instead of ship.**
 
-It wraps a Drizzle ORM handle in a typed, tenant-scoped one (`tenantDb`, `workspaceDb`, `organizationDb`). The tenant boundary stays visible in TypeScript, scope predicates are injected into your queries automatically, and in strict mode any scoped query that forgets the tenant predicate fails loudly — at the call site, before it reaches the database.
+It wraps a Drizzle ORM handle in a typed, tenant-scoped one (`tenantDb`, `workspaceDb`, `organizationDb`). Scope predicates are injected into your queries automatically, and in strict mode a scoped query that forgets the tenant predicate throws at the call site, before it reaches the database.
 
 ```ts
-// Throws MissingScopedWhereError — never silently returns every tenant's projects
+// Throws MissingScopedWhereError instead of returning every tenant's projects
 await workspaceDb.select().from(projects);
 
 // Allowed: scoped predicate is present (and re-injected as defense in depth)
@@ -19,23 +19,23 @@ await workspaceDb.select().from(projects).where(eq(projects.workspaceId, workspa
 
 ### TL;DR
 
-- 🛡️ **Strict by default** — a missing `where` or missing scope predicate throws, instead of leaking rows.
-- 🤖 **Catches the mistakes humans, codegen, and AI agents make** — the forgotten tenant filter is caught in review and at runtime, not in an incident.
-- 🧩 **Dialect-generic** — built on Drizzle core types (Postgres, SQLite, MySQL, SingleStore), no DB lock-in. Layers cleanly *with* RLS rather than replacing it.
+- 🛡️ **Strict by default.** A missing `where` or scope predicate throws instead of leaking rows.
+- 🤖 **Catches the mistakes humans, codegen, and AI agents make.** The forgotten tenant filter surfaces in review and at runtime, not in an incident.
+- 🧩 **Dialect-generic.** Built on Drizzle core types (Postgres, SQLite, MySQL, SingleStore), no DB lock-in. Layers with RLS rather than replacing it.
 
 ## Where this fits
 
-drizzle-scoped-db is an **application-layer guardrail** in the query builder. It's not database-enforced isolation — and it's designed to sit alongside it, not compete with it.
+drizzle-scoped-db is an application-layer guardrail in the query builder. It isn't database-enforced isolation, and it's built to sit alongside RLS, not compete with it.
 
-| | Enforcement layer | Isolation model | DB lock-in | Catches app-code mistakes |
-|---|---|---|---|---|
-| **drizzle-scoped-db** | App (query builder) | Shared tables + injected predicate | None (dialect-generic) | ✅ typed + loud failures |
-| Drizzle native RLS | Database | Shared tables + row policies | Postgres-only | ❌ enforced below the app |
-| drizzle-multitenant | App (middleware) | Schema-per-tenant | Postgres-only | n/a (different model) |
-| pgvpd | Proxy / wire | RLS via protocol proxy | Postgres-only | ❌ |
-| Nile | DB vendor | Virtual tenant DBs | Nile-specific | ❌ |
+|                       | Enforcement layer   | Isolation model                    | DB lock-in             | Catches app-code mistakes |
+| --------------------- | ------------------- | ---------------------------------- | ---------------------- | ------------------------- |
+| **drizzle-scoped-db** | App (query builder) | Shared tables + injected predicate | None (dialect-generic) | ✅ typed + loud failures  |
+| Drizzle native RLS    | Database            | Shared tables + row policies       | Postgres-only          | ❌ enforced below the app |
+| drizzle-multitenant   | App (middleware)    | Schema-per-tenant                  | Postgres-only          | n/a (different model)     |
+| pgvpd                 | Proxy / wire        | RLS via protocol proxy             | Postgres-only          | ❌                        |
+| Nile                  | DB vendor           | Virtual tenant DBs                 | Nile-specific          | ❌                        |
 
-RLS gives you a boundary the application can't bypass — but it lives in the database, where (as PlanetScale [argues at length](https://planetscale.com/blog/rls-sounds-great-until-it-isnt)) it brings per-row policy evaluation, connection-pooling friction, and **silent** failures that are hard to debug, and it's Postgres-only. A growing number of teams keep tenant isolation in application code for exactly those reasons. drizzle-scoped-db is a disciplined way to do that: the boundary is **visible in your TypeScript, enforced where you actually write queries, and loud** — a forgotten predicate throws instead of quietly returning the wrong rows. Want a hard backstop the app can't bypass too? Layer RLS underneath. See [How this relates to RLS](#how-this-relates-to-rls).
+RLS gives you a boundary the application can't bypass, but it lives in the database: per-row policy evaluation, connection-pooling friction, silent failures that are hard to debug, and Postgres only. PlanetScale [covers the tradeoffs](https://planetscale.com/blog/rls-sounds-great-until-it-isnt) in detail. drizzle-scoped-db keeps tenant isolation in application code instead, where it's visible in TypeScript, type-checked, and loud: a forgotten predicate throws instead of returning the wrong rows. If you want a database-level backstop too, layer RLS underneath. See [How this relates to RLS](#how-this-relates-to-rls).
 
 ## Why use it
 
@@ -76,14 +76,14 @@ WHERE projects.id = projectId
   AND projects.tenant_id = tenantId -- wrapper injects this again
 ```
 
-The predicate appears twice on purpose. You write it so the tenant boundary stays **visible in your code and in code review** — not hidden behind magic — and so TypeScript type-checks it. Strict mode then verifies you didn't forget it, and the wrapper injects its own copy as defense in depth. The duplicate is redundant in the SQL and free in practice; the point is that a forgotten predicate becomes a thrown error rather than a silent cross-tenant read.
+The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget it, then the wrapper injects its own copy as a backstop. The duplicate is redundant in the SQL and costs nothing; what it buys is a thrown error instead of a silent cross-tenant read when someone forgets the predicate.
 
 Application code that should be tenant-scoped should receive the scoped DB handle, not the raw Drizzle instance.
 
 The two approaches are not mutually exclusive, and neither is strictly "above" the other:
 
-- **App-layer scoping (this package)** keeps isolation where your code lives — typed, reviewable, dialect-generic, and loud on mistakes. It can't constrain code that deliberately bypasses the scoped handle (see [Security model](#security-model)).
-- **Database RLS** is a boundary the app can't bypass, but it's Postgres-only and carries the operational costs PlanetScale documents in [*RLS sounds great until it isn't*](https://planetscale.com/blog/rls-sounds-great-until-it-isnt): per-row policy evaluation, pooling friction, and silent failures.
+- **App-layer scoping (this package)** keeps isolation where your code lives: typed, reviewable, dialect-generic, and loud on mistakes. It can't constrain code that deliberately bypasses the scoped handle (see [Security model](#security-model)).
+- **Database RLS** is a boundary the app can't bypass, but it's Postgres-only and carries the operational costs PlanetScale documents in [_RLS sounds great until it isn't_](https://planetscale.com/blog/rls-sounds-great-until-it-isnt): per-row policy evaluation, pooling friction, and silent failures.
 
 Use app-layer scoping as your primary, visible guardrail; add RLS underneath when you also want a database-level boundary that holds even if app code goes around the wrapper. On MySQL, SingleStore, or other engines without RLS, app-layer scoping is the practical path.
 
@@ -242,7 +242,7 @@ With either shape, the wrapper can scope root tables and joined tables with rule
 
 Strict mode is enabled by default and intended for most app code. Scoped selects, updates, deletes, and relational queries must include a `where` clause with the declared scope predicate.
 
-This is intentionally not magic: callers write the tenant predicate, the wrapper verifies it, then injects it again. If generated code, agent-authored code, or a rushed refactor forgets the predicate, the query throws.
+Callers write the tenant predicate, the wrapper verifies it, then injects it again. If generated code, agent-authored code, or a rushed refactor forgets the predicate, the query throws.
 
 ```ts
 const workspaceDb = createScopedDb(db, {
