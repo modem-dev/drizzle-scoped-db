@@ -1,10 +1,41 @@
 # drizzle-scoped-db
 
-Typed tenant scoping for Drizzle ORM query builders.
+[![npm version](https://img.shields.io/npm/v/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
+[![types](https://img.shields.io/npm/types/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](#development)
+[![license](https://img.shields.io/npm/l/@modemdev/drizzle-scoped-db.svg)](./LICENSE)
 
-`drizzle-scoped-db` creates scoped Drizzle handles such as `tenantDb`, `workspaceDb`, or `organizationDb`. Scoped handles keep the tenant boundary visible in TypeScript, validate scoped inserts, and fail loudly when strict-mode queries omit the tenant predicate.
+**One forgotten `WHERE tenant_id = ...` leaks another tenant's rows. `drizzle-scoped-db` makes that mistake throw instead of ship.**
 
-It is not database-enforced Row Level Security (RLS), though the two can be used together.
+It wraps a Drizzle ORM handle in a typed, tenant-scoped one (`tenantDb`, `workspaceDb`, `organizationDb`). The tenant boundary stays visible in TypeScript, scope predicates are injected into your queries automatically, and in strict mode any scoped query that forgets the tenant predicate fails loudly — at the call site, before it reaches the database.
+
+```ts
+// Throws MissingScopedWhereError — never silently returns every tenant's projects
+await workspaceDb.select().from(projects);
+
+// Allowed: scoped predicate is present (and re-injected as defense in depth)
+await workspaceDb.select().from(projects).where(eq(projects.workspaceId, workspaceId));
+```
+
+### TL;DR
+
+- 🛡️ **Strict by default** — a missing `where` or missing scope predicate throws, instead of leaking rows.
+- 🤖 **Catches the mistakes humans, codegen, and AI agents make** — the forgotten tenant filter is caught in review and at runtime, not in an incident.
+- 🧩 **Dialect-generic** — built on Drizzle core types (Postgres, SQLite, MySQL, SingleStore), no DB lock-in. Layers cleanly *with* RLS rather than replacing it.
+
+## Where this fits
+
+drizzle-scoped-db is an **application-layer guardrail** in the query builder. It's not database-enforced isolation — and it's designed to sit alongside it, not compete with it.
+
+| | Enforcement layer | Isolation model | DB lock-in | Catches app-code mistakes |
+|---|---|---|---|---|
+| **drizzle-scoped-db** | App (query builder) | Shared tables + injected predicate | None (dialect-generic) | ✅ typed + loud failures |
+| Drizzle native RLS | Database | Shared tables + row policies | Postgres-only | ❌ enforced below the app |
+| drizzle-multitenant | App (middleware) | Schema-per-tenant | Postgres-only | n/a (different model) |
+| pgvpd | Proxy / wire | RLS via protocol proxy | Postgres-only | ❌ |
+| Nile | DB vendor | Virtual tenant DBs | Nile-specific | ❌ |
+
+RLS gives you a boundary the application can't bypass — but it lives in the database, where (as PlanetScale [argues at length](https://planetscale.com/blog/rls-sounds-great-until-it-isnt)) it brings per-row policy evaluation, connection-pooling friction, and **silent** failures that are hard to debug, and it's Postgres-only. A growing number of teams keep tenant isolation in application code for exactly those reasons. drizzle-scoped-db is a disciplined way to do that: the boundary is **visible in your TypeScript, enforced where you actually write queries, and loud** — a forgotten predicate throws instead of quietly returning the wrong rows. Want a hard backstop the app can't bypass too? Layer RLS underneath. See [How this relates to RLS](#how-this-relates-to-rls).
 
 ## Why use it
 
@@ -45,7 +76,16 @@ WHERE projects.id = projectId
   AND projects.tenant_id = tenantId -- wrapper injects this again
 ```
 
-Application code that should be tenant-scoped should receive the scoped DB handle, not the raw Drizzle instance. RLS and scoped handles are not mutually exclusive; use both when you want typed app boundaries plus database-level enforcement outside the query-builder path.
+The predicate appears twice on purpose. You write it so the tenant boundary stays **visible in your code and in code review** — not hidden behind magic — and so TypeScript type-checks it. Strict mode then verifies you didn't forget it, and the wrapper injects its own copy as defense in depth. The duplicate is redundant in the SQL and free in practice; the point is that a forgotten predicate becomes a thrown error rather than a silent cross-tenant read.
+
+Application code that should be tenant-scoped should receive the scoped DB handle, not the raw Drizzle instance.
+
+The two approaches are not mutually exclusive, and neither is strictly "above" the other:
+
+- **App-layer scoping (this package)** keeps isolation where your code lives — typed, reviewable, dialect-generic, and loud on mistakes. It can't constrain code that deliberately bypasses the scoped handle (see [Security model](#security-model)).
+- **Database RLS** is a boundary the app can't bypass, but it's Postgres-only and carries the operational costs PlanetScale documents in [*RLS sounds great until it isn't*](https://planetscale.com/blog/rls-sounds-great-until-it-isnt): per-row policy evaluation, pooling friction, and silent failures.
+
+Use app-layer scoping as your primary, visible guardrail; add RLS underneath when you also want a database-level boundary that holds even if app code goes around the wrapper. On MySQL, SingleStore, or other engines without RLS, app-layer scoping is the practical path.
 
 ## Install
 
