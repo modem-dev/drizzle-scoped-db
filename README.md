@@ -21,19 +21,19 @@ await workspaceDb.select().from(projects).where(eq(projects.workspaceId, workspa
 
 - 🛡️ **Strict by default** — a missing `where` or missing scope predicate throws, instead of leaking rows.
 - 🤖 **Catches the mistakes humans, codegen, and AI agents make** — the forgotten tenant filter is caught in review and at runtime, not in an incident.
-- 🧩 **Dialect-generic** — built on Drizzle core types (Postgres, SQLite, MySQL, SingleStore), no DB lock-in. Layers cleanly *with* RLS rather than replacing it.
+- 🧩 **Dialect-generic** — built on Drizzle core types (Postgres, SQLite, MySQL, SingleStore), no DB lock-in. Layers cleanly _with_ RLS rather than replacing it.
 
 ## Where this fits
 
 drizzle-scoped-db is an **application-layer guardrail** in the query builder. It's not database-enforced isolation — and it's designed to sit alongside it, not compete with it.
 
-| | Enforcement layer | Isolation model | DB lock-in | Catches app-code mistakes |
-|---|---|---|---|---|
-| **drizzle-scoped-db** | App (query builder) | Shared tables + injected predicate | None (dialect-generic) | ✅ typed + loud failures |
-| Drizzle native RLS | Database | Shared tables + row policies | Postgres-only | ❌ enforced below the app |
-| drizzle-multitenant | App (middleware) | Schema-per-tenant | Postgres-only | n/a (different model) |
-| pgvpd | Proxy / wire | RLS via protocol proxy | Postgres-only | ❌ |
-| Nile | DB vendor | Virtual tenant DBs | Nile-specific | ❌ |
+|                       | Enforcement layer   | Isolation model                    | DB lock-in             | Catches app-code mistakes |
+| --------------------- | ------------------- | ---------------------------------- | ---------------------- | ------------------------- |
+| **drizzle-scoped-db** | App (query builder) | Shared tables + injected predicate | None (dialect-generic) | ✅ typed + loud failures  |
+| Drizzle native RLS    | Database            | Shared tables + row policies       | Postgres-only          | ❌ enforced below the app |
+| drizzle-multitenant   | App (middleware)    | Schema-per-tenant                  | Postgres-only          | n/a (different model)     |
+| pgvpd                 | Proxy / wire        | RLS via protocol proxy             | Postgres-only          | ❌                        |
+| Nile                  | DB vendor           | Virtual tenant DBs                 | Nile-specific          | ❌                        |
 
 RLS gives you a boundary the application can't bypass — but it lives in the database, where (as PlanetScale [argues at length](https://planetscale.com/blog/rls-sounds-great-until-it-isnt)) it brings per-row policy evaluation, connection-pooling friction, and **silent** failures that are hard to debug, and it's Postgres-only. A growing number of teams keep tenant isolation in application code for exactly those reasons. drizzle-scoped-db is a disciplined way to do that: the boundary is **visible in your TypeScript, enforced where you actually write queries, and loud** — a forgotten predicate throws instead of quietly returning the wrong rows. Want a hard backstop the app can't bypass too? Layer RLS underneath. See [How this relates to RLS](#how-this-relates-to-rls).
 
@@ -83,7 +83,7 @@ Application code that should be tenant-scoped should receive the scoped DB handl
 The two approaches are not mutually exclusive, and neither is strictly "above" the other:
 
 - **App-layer scoping (this package)** keeps isolation where your code lives — typed, reviewable, dialect-generic, and loud on mistakes. It can't constrain code that deliberately bypasses the scoped handle (see [Security model](#security-model)).
-- **Database RLS** is a boundary the app can't bypass, but it's Postgres-only and carries the operational costs PlanetScale documents in [*RLS sounds great until it isn't*](https://planetscale.com/blog/rls-sounds-great-until-it-isnt): per-row policy evaluation, pooling friction, and silent failures.
+- **Database RLS** is a boundary the app can't bypass, but it's Postgres-only and carries the operational costs PlanetScale documents in [_RLS sounds great until it isn't_](https://planetscale.com/blog/rls-sounds-great-until-it-isnt): per-row policy evaluation, pooling friction, and silent failures.
 
 Use app-layer scoping as your primary, visible guardrail; add RLS underneath when you also want a database-level boundary that holds even if app code goes around the wrapper. On MySQL, SingleStore, or other engines without RLS, app-layer scoping is the practical path.
 
