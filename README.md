@@ -1,7 +1,6 @@
 # drizzle-scoped-db
 
 [![npm version](https://img.shields.io/npm/v/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
-[![npm downloads](https://img.shields.io/npm/dm/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
 [![types](https://img.shields.io/npm/types/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
 [![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](#development)
 [![license](https://img.shields.io/npm/l/@modemdev/drizzle-scoped-db.svg)](./LICENSE)
