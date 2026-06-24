@@ -27,3 +27,48 @@ jobs:
       - run: pnpm coverage
       - run: pnpm build
       - run: npm pack --dry-run
+
+  drizzle-rc-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm add --save-dev drizzle-orm@1.0.0-rc.3 --ignore-scripts
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - name: Smoke test Drizzle 1.0 rc compatibility
+        run: |
+          node --input-type=module <<'JS'
+          import { eq } from "drizzle-orm";
+          import * as pg from "drizzle-orm/pg-core";
+          import { mysqlTable, varchar } from "drizzle-orm/mysql-core";
+          import { sqliteTable, text as sqliteText } from "drizzle-orm/sqlite-core";
+          import { containsColumnFilter, scopeByColumn } from "./dist/index.js";
+
+          const tables = [
+            pg.pgTable("pg_projects", { workspaceId: pg.text("workspace_id") }),
+            mysqlTable("mysql_projects", { workspaceId: varchar("workspace_id", { length: 64 }) }),
+            sqliteTable("sqlite_projects", { workspaceId: sqliteText("workspace_id") }),
+            pg.snakeCase.table("snake_case_projects", { workspaceId: pg.text() }),
+          ];
+
+          for (const table of tables) {
+            scopeByColumn(table, table.workspaceId).where("workspace-1");
+            if (!containsColumnFilter(eq(table.workspaceId, "workspace-1"), "workspace_id")) {
+              throw new Error(`Drizzle SQL chunks did not expose workspace_id for ${table.workspaceId.name}`);
+            }
+          }
+          JS
+      - name: Verify npm peer resolution with Drizzle 1.0 rc
+        run: |
+          tarball="$(npm pack --ignore-scripts --silent | tail -n 1)"
+          app_dir="$(mktemp -d)"
+          cd "$app_dir"
+          npm init -y
+          npm install "$GITHUB_WORKSPACE/$tarball" drizzle-orm@1.0.0-rc.3 --ignore-scripts --no-audit --no-fund
