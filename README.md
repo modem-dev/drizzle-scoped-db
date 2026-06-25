@@ -416,7 +416,7 @@ type ScopedTableRule<TScope, TInsert = Record<string, unknown>> = {
 };
 ```
 
-### `assertDrizzleCompatibility(condition, expectedColumnName)`
+### `assertDrizzleCompatibility(condition, expectedColumnName, expectedTable?)`
 
 Optional startup assertion for projects that rely on `strict` mode or `containsColumnFilter`.
 
@@ -424,10 +424,14 @@ Optional startup assertion for projects that rely on `strict` mode or `containsC
 import { assertDrizzleCompatibility } from "@modemdev/drizzle-scoped-db";
 import { eq } from "drizzle-orm";
 
+// Name-only check (backward compatible)
 assertDrizzleCompatibility(eq(projects.workspaceId, "compat-check"), "workspace_id");
+
+// Table-aware check (recommended when using scopeByColumn's default detector)
+assertDrizzleCompatibility(eq(projects.workspaceId, "compat-check"), "workspace_id", projects);
 ```
 
-If a Drizzle upgrade changes the internal SQL chunk shape, this fails fast instead of letting strict validation silently return `false`.
+If a Drizzle upgrade changes the internal SQL chunk shape, this fails fast instead of letting strict validation silently return `false`. Pass the table to also verify that column chunks expose table identity for alias-safe disambiguation.
 
 ## Errors
 
