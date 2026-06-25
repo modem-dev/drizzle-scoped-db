@@ -22,6 +22,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Fixed
 
+- Strict-mode scope detection now matches table identity in addition to column name, preventing false positives when a joined table shares a column name with the scoped table.
+
 ## [0.6.0] - 2026-06-23
 
 ### Added

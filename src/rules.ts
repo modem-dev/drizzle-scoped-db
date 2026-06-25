@@ -21,7 +21,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
       ? (row, scopeValue) =>
           equals((row as Record<string, unknown>)[options.insertKey as string], scopeValue)
       : undefined,
-    hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName),
+    hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName, table),
   };
 }
 
