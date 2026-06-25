@@ -64,6 +64,8 @@ type FakeFromBuilder = {
   where(condition: SQL | undefined): FakeWhereResult;
   leftJoin(table: unknown, on: SQL): FakeFromBuilder;
   innerJoin(table: unknown, on: SQL): FakeFromBuilder;
+  prepare(): unknown;
+  as(alias: string): unknown;
 };
 
 type FakeSelectBuilder = {
@@ -91,16 +93,20 @@ type FakeDb = {
   select(columns?: Record<string, unknown>): FakeSelectBuilder;
   selectDistinct(columns?: Record<string, unknown>): FakeSelectBuilder;
   selectDistinctOn(onColumns: unknown[], columns?: Record<string, unknown>): FakeSelectBuilder;
-  insert(table: unknown): { values(values: unknown): { values: unknown } };
+  insert(table: unknown): { values(values: unknown): { values: unknown }; returning(): unknown };
   update(table: unknown): {
     set(values: Record<string, unknown>): {
       where(condition: SQL | undefined): {
         condition: SQL | undefined;
         values: Record<string, unknown>;
       };
+      returning(): unknown;
     };
   };
-  delete(table: unknown): { where(condition: SQL | undefined): { condition: SQL | undefined } };
+  delete(table: unknown): {
+    where(condition: SQL | undefined): { condition: SQL | undefined };
+    returning(): unknown;
+  };
   transaction<T>(callback: (tx: FakeDb) => Promise<T>): Promise<T>;
   execute(): undefined;
   _state: FakeDbState;
@@ -147,6 +153,9 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
           state.insertValues = values;
           return { values };
         },
+        returning() {
+          return undefined;
+        },
       };
     },
     update(_table: unknown) {
@@ -157,6 +166,9 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
               state.updateCondition = condition;
               return { condition, values };
             },
+            returning() {
+              return undefined;
+            },
           };
         },
       };
@@ -166,6 +178,9 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
         where(condition: SQL | undefined) {
           state.deleteCondition = condition;
           return { condition };
+        },
+        returning() {
+          return undefined;
         },
       };
     },
@@ -237,6 +252,12 @@ function createFromBuilder(state: FakeDbState): FakeFromBuilder {
       state.joinConditions = [...(state.joinConditions ?? []), on];
       return builder;
     },
+    prepare() {
+      return undefined;
+    },
+    as(_alias: string) {
+      return undefined;
+    },
   };
 
   return builder;
@@ -263,7 +284,7 @@ describe("createScopedDb", () => {
 
     scopedDb.select().from(projectsTbl).where(eq(projectsTbl.id, "project-1"));
 
-    expect((scopedDb as FakeDb & { _unsafeUnscopedDb: FakeDb })._unsafeUnscopedDb).toBe(rawDb);
+    expect(scopedDb._unsafeUnscopedDb).toBe(rawDb);
     expect(rawDb._state.selectCondition).toBeDefined();
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(true);
     expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
@@ -503,25 +524,83 @@ describe("createScopedDb", () => {
         assertWorkspaceId: (expected: string) => expect(scopeValue).toBe(expected),
       }),
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
-    }) as FakeDb & {
-      _raw: FakeDb;
-      _workspaceId: string;
-      toJSON(): { scopeValue: string };
-      assertWorkspaceId(expected: string): void;
-    };
+    });
 
     expect(scopedDb._raw).toBe(rawDb);
     expect(scopedDb._workspaceId).toBe("workspace-1");
-    expect(scopedDb.toJSON()).toEqual({ scopeValue: "workspace-1" });
+    expect(scopedDb.toJSON?.()).toEqual({ scopeValue: "workspace-1" });
     scopedDb.assertWorkspaceId("workspace-1");
 
     await scopedDb.transaction(async (tx) => {
-      const scopedTx = tx as FakeDb & { _raw: FakeDb; _workspaceId: string };
-      scopedTx
-        .insert(projectsTbl)
-        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" });
-      expect(scopedTx._raw).toBe(rawDb._state.transactionRawDb);
-      expect(scopedTx._workspaceId).toBe("workspace-1");
+      tx.insert(projectsTbl).values({
+        id: "project-1",
+        workspaceId: "workspace-1",
+        name: "Roadmap",
+      });
+      tx.assertWorkspaceId("workspace-1");
+      expect(tx._raw).toBe(rawDb._state.transactionRawDb);
+      expect(tx._workspaceId).toBe("workspace-1");
+    });
+  });
+
+  it("keeps the scoped builder surface narrow at the type level", async () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    rawDb.select().from(projectsTbl).prepare();
+    rawDb.insert(projectsTbl).returning();
+    rawDb.update(projectsTbl).set({ name: "Updated" }).returning();
+    rawDb.delete(projectsTbl).returning();
+
+    expect(scopedDb.query.projects).toBeDefined();
+
+    const selectBuilder = scopedDb.select().from(projectsTbl);
+    selectBuilder.where(eq(projectsTbl.id, "project-1"));
+    selectBuilder.leftJoin(usersTbl, eq(usersTbl.id, projectsTbl.id));
+    selectBuilder.innerJoin(usersTbl, eq(usersTbl.id, projectsTbl.id));
+    // @ts-expect-error Scoped select builders do not promise Drizzle's prepare() API.
+    void selectBuilder.prepare;
+
+    const distinctSelectBuilder = scopedDb.selectDistinct().from(projectsTbl);
+    distinctSelectBuilder.where(eq(projectsTbl.id, "project-2"));
+    // @ts-expect-error Scoped select builders do not promise Drizzle's as() API.
+    void distinctSelectBuilder.as;
+
+    const distinctOnBuilder = scopedDb
+      .selectDistinctOn([projectsTbl.id], { id: projectsTbl.id })
+      .from(projectsTbl);
+    distinctOnBuilder.where(eq(projectsTbl.id, "project-3"));
+    // @ts-expect-error Scoped selectDistinctOn builders stay narrow too.
+    void distinctOnBuilder.prepare;
+
+    const insertBuilder = scopedDb.insert(projectsTbl);
+    insertBuilder.values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" });
+    // @ts-expect-error Scoped insert builders only expose values().
+    void insertBuilder.returning;
+
+    const updateBuilder = scopedDb.update(projectsTbl).set({ name: "Updated" });
+    updateBuilder.where(eq(projectsTbl.id, "project-1"));
+    // @ts-expect-error Scoped update builders only expose where() after set().
+    void updateBuilder.returning;
+
+    const deleteBuilder = scopedDb.delete(projectsTbl);
+    deleteBuilder.where(eq(projectsTbl.id, "project-1"));
+    // @ts-expect-error Scoped delete builders only expose where().
+    void deleteBuilder.returning;
+
+    await scopedDb.transaction(async (tx) => {
+      tx.select().from(projectsTbl).where(eq(projectsTbl.id, "project-4"));
+      await tx.query.projects.findFirst({
+        where: (project, { eq }) => eq(project.id, "project-4"),
+      });
+      tx.execute();
+      // @ts-expect-error Transaction-scoped builders stay narrowed too.
+      void tx.select().from(projectsTbl).prepare;
     });
   });
 

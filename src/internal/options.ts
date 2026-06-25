@@ -27,25 +27,56 @@ type RuleIndexes<TScope> = {
   rulesByQueryName: Map<string, ScopedTableRule<TScope>>;
 };
 
-export type NormalizedCreateScopedDbOptions<TScope> = Required<
-  Pick<CreateScopedDbOptions<TScope>, "unscopedDbPropertyName">
+export type NormalizedCreateScopedDbOptions<
+  TScope,
+  TExtensions extends Record<string, unknown> = {},
+  TUnscopedDbPropertyName extends string = string,
+  TScopeValuePropertyName extends string | undefined = string | undefined,
+> = Required<
+  Pick<
+    CreateScopedDbOptions<TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName>,
+    "unscopedDbPropertyName"
+  >
 > &
-  Omit<CreateScopedDbOptions<TScope>, "unscopedDbPropertyName"> &
+  Omit<
+    CreateScopedDbOptions<TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName>,
+    "unscopedDbPropertyName"
+  > &
   RuleIndexes<TScope>;
 
 const ruleIndexCache = new WeakMap<ScopedTableRule<unknown>[], RuleIndexes<unknown>>();
 
 /** Normalize options and precompute rule lookup maps. */
-export function normalizeOptions<TScope>(
-  options: CreateScopedDbOptions<TScope>,
-): NormalizedCreateScopedDbOptions<TScope> {
+export function normalizeOptions<
+  TScope,
+  TExtensions extends Record<string, unknown>,
+  TUnscopedDbPropertyName extends string,
+  TScopeValuePropertyName extends string | undefined,
+>(
+  options: CreateScopedDbOptions<
+    TScope,
+    TExtensions,
+    TUnscopedDbPropertyName,
+    TScopeValuePropertyName
+  >,
+): NormalizedCreateScopedDbOptions<
+  TScope,
+  TExtensions,
+  TUnscopedDbPropertyName,
+  TScopeValuePropertyName
+> {
   const ruleIndexes = getRuleIndexes(options.rules);
 
   return {
     ...options,
     unscopedDbPropertyName: options.unscopedDbPropertyName ?? "_unsafeUnscopedDb",
     ...ruleIndexes,
-  };
+  } as NormalizedCreateScopedDbOptions<
+    TScope,
+    TExtensions,
+    TUnscopedDbPropertyName,
+    TScopeValuePropertyName
+  >;
 }
 
 /** Build rule lookup indexes once for stable rule arrays so cached scoped DBs do not duplicate them per scope value. */

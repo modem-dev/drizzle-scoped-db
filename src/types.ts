@@ -1,4 +1,4 @@
-import type { and, eq, or, SQL, Table, TableConfig } from "drizzle-orm";
+import type { and, Column, eq, or, SQL, Table, TableConfig } from "drizzle-orm";
 
 /** Table type used by Drizzle's PostgreSQL query builders. */
 export type ScopedTable = Table<TableConfig> & {
@@ -64,7 +64,12 @@ export type ScopedDbErrors<TScope> = {
 };
 
 /** Options for creating a scoped Drizzle wrapper. */
-export type CreateScopedDbOptions<TScope> = {
+export type CreateScopedDbOptions<
+  TScope,
+  TExtensions extends Record<string, unknown> = {},
+  TUnscopedDbPropertyName extends string = "_unsafeUnscopedDb",
+  TScopeValuePropertyName extends string | undefined = undefined,
+> = {
   /** Human-readable scope name, for example `organization`, `tenant`, or `workspace`. */
   scopeName: string;
   /** The current scope value that will be injected into protected queries. */
@@ -77,16 +82,128 @@ export type CreateScopedDbOptions<TScope> = {
    */
   strict?: boolean;
   /** Property name for the intentionally unsafe unscoped DB escape hatch. Defaults to `_unsafeUnscopedDb`. */
-  unscopedDbPropertyName?: string;
+  unscopedDbPropertyName?: TUnscopedDbPropertyName;
   /** Optional property name that exposes the current scope value. */
-  scopeValueProperty?: string;
+  scopeValueProperty?: TScopeValuePropertyName;
   /** Optional custom JSON serialization hook. */
   toJSON?: (scopeValue: TScope, scopeName: string) => unknown;
   /** Optional extension methods/properties copied onto every scoped wrapper, including transactions. */
-  extensions?: (scopeValue: TScope, scopeName: string) => Record<string, unknown>;
+  extensions?: (scopeValue: TScope, scopeName: string) => TExtensions;
   /** Optional error factories. */
   errors?: ScopedDbErrors<TScope>;
 };
+
+/** Type helper to infer selected values from a Drizzle selection object. */
+export type InferSelection<TSelection> = {
+  [K in keyof TSelection]: TSelection[K] extends Column<infer Config> ? Config["data"] : never;
+};
+
+/** Query builder returned after `.where(...)` is called. */
+export interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
+  limit(n: number): ScopedWhereBuilder<TResult>;
+  offset(n: number): ScopedWhereBuilder<TResult>;
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+  orderBy(...columns: any[]): ScopedWhereBuilder<TResult>;
+}
+
+/** Query builder returned after selecting from a scoped table. */
+export interface ScopedQueryBuilder<
+  TTable extends ScopedTable,
+  TResult = NonNullable<TTable["$inferSelect"]>[],
+> {
+  where(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
+  leftJoin<TJoinTable extends Table<TableConfig>>(
+    table: TJoinTable,
+    on: SQL,
+  ): ScopedQueryBuilder<TTable, TResult>;
+  innerJoin<TJoinTable extends Table<TableConfig>>(
+    table: TJoinTable,
+    on: SQL,
+  ): ScopedQueryBuilder<TTable, TResult>;
+  then<TResult1 = unknown, TResult2 = never>(
+    onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2>;
+}
+
+/** Select builder facade that scopes only tables with matching rules. */
+export interface ScopedSelectBuilder<TSelection = undefined> {
+  from<TTable extends ScopedTable>(
+    table: TTable,
+  ): ScopedQueryBuilder<
+    TTable,
+    TSelection extends undefined
+      ? NonNullable<TTable["$inferSelect"]>[]
+      : InferSelection<TSelection>[]
+  >;
+}
+
+/** Minimal insert builder facade exposed by scoped DB wrappers. */
+export interface ScopedInsertBuilder {
+  values(values: Record<string, unknown> | Record<string, unknown>[]): unknown;
+}
+
+/** Minimal update builder facade exposed by scoped DB wrappers. */
+export interface ScopedUpdateBuilder {
+  set(values: Record<string, unknown>): ScopedUpdateWhereBuilder;
+}
+
+/** Builder facade returned after `.set(...)` is called. */
+export interface ScopedUpdateWhereBuilder {
+  where(condition: SQL | undefined): unknown;
+}
+
+/** Minimal delete builder facade exposed by scoped DB wrappers. */
+export interface ScopedDeleteBuilder {
+  where(condition: SQL | undefined): unknown;
+}
+
+/** Surface exposed by scoped Drizzle database wrappers. */
+export type ScopedDb<
+  TDb extends object,
+  TScope,
+  TExtensions extends Record<string, unknown> = {},
+  TUnscopedDbPropertyName extends string = "_unsafeUnscopedDb",
+  TScopeValuePropertyName extends string | undefined = undefined,
+> = {
+  /** Select from a scoped table. */
+  select<TSelection extends Record<string, unknown> | undefined = undefined>(
+    columns?: TSelection,
+  ): ScopedSelectBuilder<TSelection>;
+  /** Select distinct from a scoped table. */
+  selectDistinct<TSelection extends Record<string, unknown> | undefined = undefined>(
+    columns?: TSelection,
+  ): ScopedSelectBuilder<TSelection>;
+  /** Select distinct on columns from a scoped table, when the underlying DB exposes it. */
+  selectDistinctOn: TDb extends { selectDistinctOn: infer TSelectDistinctOn }
+    ? TSelectDistinctOn extends (...args: never[]) => unknown
+      ? <TSelection extends Record<string, unknown> | undefined = undefined>(
+          onColumns: unknown[],
+          columns?: TSelection,
+        ) => ScopedSelectBuilder<TSelection>
+      : undefined
+    : undefined;
+  /** Insert into a scoped table. */
+  insert<TTable extends ScopedTable>(table: TTable): ScopedInsertBuilder;
+  /** Update a scoped table. */
+  update<TTable extends ScopedTable>(table: TTable): ScopedUpdateBuilder;
+  /** Delete from a scoped table. */
+  delete<TTable extends ScopedTable>(table: TTable): ScopedDeleteBuilder;
+  /** Start a scoped transaction. */
+  transaction<T>(
+    callback: (
+      tx: ScopedDb<TDb, TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName>,
+    ) => Promise<T>,
+  ): Promise<T>;
+  /** The raw relational query API, with scoped wrappers on protected tables. */
+  query: TDb extends { query: infer TQuery } ? TQuery : undefined;
+  /** A pass-through execute escape hatch, when the underlying DB exposes one. */
+  execute: TDb extends { execute: infer TExecute } ? TExecute : undefined;
+  /** Optional custom JSON serialization hook. */
+  toJSON?: () => unknown;
+} & TExtensions &
+  Record<TUnscopedDbPropertyName, TDb> &
+  (TScopeValuePropertyName extends string ? Record<TScopeValuePropertyName, TScope> : {});
 
 /** Options for the column-based scoping shortcut. */
 export type ScopeByColumnOptions<TScope> = {

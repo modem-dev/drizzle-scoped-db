@@ -1,6 +1,12 @@
 import type { SQL } from "drizzle-orm";
 
-import type { ScopedTable, ScopedTableRule } from "../types.js";
+import type {
+  ScopedDeleteBuilder,
+  ScopedInsertBuilder,
+  ScopedTable,
+  ScopedTableRule,
+  ScopedUpdateBuilder,
+} from "../types.js";
 import type { DrizzleLikeDb, NormalizedCreateScopedDbOptions } from "./options.js";
 import {
   assertWhereAllowed,
@@ -16,7 +22,7 @@ export function createScopedInsertBuilder<TScope, TTable extends ScopedTable>(
   table: TTable,
   rule: ScopedTableRule<TScope, TTable>,
   options: NormalizedCreateScopedDbOptions<TScope>,
-) {
+): ScopedInsertBuilder {
   const dbRecord = db as DrizzleLikeDb;
   const insertBuilder = dbRecord.insert(table);
 
@@ -43,7 +49,7 @@ export function createScopedUpdateBuilder<TScope, TTable extends ScopedTable>(
   table: TTable,
   rule: ScopedTableRule<TScope, TTable>,
   options: NormalizedCreateScopedDbOptions<TScope>,
-) {
+): ScopedUpdateBuilder {
   const dbRecord = db as DrizzleLikeDb;
   const updateBuilder = dbRecord.update(table);
 
@@ -73,7 +79,7 @@ export function createScopedDeleteBuilder<TScope, TTable extends ScopedTable>(
   table: TTable,
   rule: ScopedTableRule<TScope, TTable>,
   options: NormalizedCreateScopedDbOptions<TScope>,
-) {
+): ScopedDeleteBuilder {
   const dbRecord = db as DrizzleLikeDb;
   const deleteBuilder = dbRecord.delete(table);
 

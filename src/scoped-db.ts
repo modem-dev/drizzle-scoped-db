@@ -1,4 +1,4 @@
-import type { CreateScopedDbOptions, ScopedTable } from "./types.js";
+import type { CreateScopedDbOptions, ScopedDb, ScopedTable } from "./types.js";
 import {
   createScopedDeleteBuilder,
   createScopedInsertBuilder,
@@ -13,18 +13,40 @@ import { createScopedTableQuery } from "./internal/relational.js";
 import { createScopedSelectBuilder } from "./internal/select.js";
 
 /** Create a Drizzle wrapper that injects declared table scope predicates. */
-export function createScopedDb<TDb extends object, TScope>(
+export function createScopedDb<
+  TDb extends object,
+  TScope,
+  TExtensions extends Record<string, unknown> = {},
+  TUnscopedDbPropertyName extends string = "_unsafeUnscopedDb",
+  TScopeValuePropertyName extends string | undefined = undefined,
+>(
   db: TDb,
-  options: CreateScopedDbOptions<TScope>,
-): TDb {
+  options: CreateScopedDbOptions<
+    TScope,
+    TExtensions,
+    TUnscopedDbPropertyName,
+    TScopeValuePropertyName
+  >,
+): ScopedDb<TDb, TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName> {
   return createScopedDbInternal(db, normalizeOptions(options));
 }
 
 /** Internal wrapper constructor reused by root wrappers and transaction wrappers. */
-function createScopedDbInternal<TDb extends object, TScope>(
+function createScopedDbInternal<
+  TDb extends object,
+  TScope,
+  TExtensions extends Record<string, unknown> = {},
+  TUnscopedDbPropertyName extends string = "_unsafeUnscopedDb",
+  TScopeValuePropertyName extends string | undefined = undefined,
+>(
   db: TDb,
-  options: NormalizedCreateScopedDbOptions<TScope>,
-): TDb {
+  options: NormalizedCreateScopedDbOptions<
+    TScope,
+    TExtensions,
+    TUnscopedDbPropertyName,
+    TScopeValuePropertyName
+  >,
+): ScopedDb<TDb, TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName> {
   const dbRecord = db as DrizzleLikeDb;
   const wrappedTableQueryCache = new Map<string, unknown>();
   const rawQuery = dbRecord.query;
@@ -98,7 +120,11 @@ function createScopedDbInternal<TDb extends object, TScope>(
 
     query: queryProxy,
 
-    async transaction<T>(callback: (tx: TDb) => Promise<T>): Promise<T> {
+    async transaction<T>(
+      callback: (
+        tx: ScopedDb<TDb, TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName>,
+      ) => Promise<T>,
+    ): Promise<T> {
       return dbRecord.transaction(async (tx: TDb) => callback(createScopedDbInternal(tx, options)));
     },
 
@@ -141,5 +167,11 @@ function createScopedDbInternal<TDb extends object, TScope>(
     Object.assign(scoped, options.extensions(options.scopeValue, options.scopeName));
   }
 
-  return scoped as TDb;
+  return scoped as ScopedDb<
+    TDb,
+    TScope,
+    TExtensions,
+    TUnscopedDbPropertyName,
+    TScopeValuePropertyName
+  >;
 }

@@ -2,6 +2,12 @@
 
 All notable user-visible changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- `createScopedDb` now returns an explicit scoped wrapper type instead of the raw database type, so TypeScript no longer exposes raw Drizzle builder methods that the protected scoped facade does not provide.
+
 ## [0.7.0] - 2026-06-26
 
 ### Added
