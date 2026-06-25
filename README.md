@@ -281,6 +281,8 @@ await workspaceDb
   .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
 ```
 
+The predicate must sit on the scoped table itself: filtering a joined table's same-named column (e.g. `eq(tasks.workspaceId, workspaceId)` while selecting `projects`) does not satisfy the check, though aliased self-joins still do.
+
 Custom `defineScopedTable` rules need `hasScopeInWhere` for strict validation. Opt out with `strict: false` if you want pure predicate injection:
 
 ```ts
