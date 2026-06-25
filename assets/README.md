@@ -10,3 +10,12 @@ After editing the SVG, regenerate the PNG with:
 ```bash
 magick -background none assets/social-preview.svg assets/social-preview.png
 ```
+
+## Before / after diagram
+
+- `before-after.svg` is the editable source.
+- `before-after.png` is the 1600×900 raster export used in the README and for social/tweet promotion. It contrasts a plain Drizzle handle (a forgotten scope filter leaks silently) with a `drizzle-scoped-db` handle (the same query throws).
+
+```bash
+magick -background none assets/before-after.svg assets/before-after.png
+```

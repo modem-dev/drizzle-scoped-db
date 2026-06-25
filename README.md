@@ -7,7 +7,11 @@
 
 **One forgotten `WHERE tenant_id = ...` leaks another tenant's rows. `drizzle-scoped-db` makes that mistake throw instead of ship.**
 
-It wraps a Drizzle ORM handle in a typed, tenant-scoped one (`tenantDb`, `workspaceDb`, `organizationDb`). The tenant boundary stays visible in TypeScript, scope predicates are injected into your queries automatically, and in strict mode any scoped query that forgets the tenant predicate fails loudly — at the call site, before it reaches the database.
+<p align="center">
+  <img src="./assets/before-after.png" width="820" alt="With a plain Drizzle handle a forgotten org filter silently returns every org's rows; with a drizzle-scoped-db handle the same query throws MissingScopedWhereError, caught before it ships." />
+</p>
+
+It wraps a Drizzle ORM handle in a typed, **scoped** one (`orgDb`, `tenantDb`, `workspaceDb`). Multi-tenancy is the headline use, but the same guardrail fits **any predicate a query must never forget** — org, user, region, soft-delete. The scope boundary stays visible in TypeScript, scope predicates are injected into your queries automatically, and in strict mode any scoped query that forgets its predicate fails loudly — at the call site, before it reaches the database.
 
 ```ts
 // Throws MissingScopedWhereError — never silently returns every tenant's projects
@@ -45,6 +49,18 @@ RLS gives you a boundary the application can't bypass — but it lives in the da
 - Inject scope predicates into supported selects, joins, mutations, and relational root queries.
 - Validate scoped inserts before they reach the database.
 - Catch missing predicates in human-written, generated, or agent-authored code.
+
+## Beyond tenancy
+
+Tenancy is the headline use, but `drizzle-scoped-db` is really a guardrail for **any predicate a query must never forget**. The scope is whatever you express as a Drizzle `where`:
+
+- **Per-user data** — force `user_id = currentUser` on private rows (a `userDb` instead of `orgDb`).
+- **Region / data residency** — keep `region = 'eu'` on every query.
+- **Soft deletes** — always exclude deleted rows with `isNull(table.deletedAt)` via [`defineScopedTable`](#custom-scope-rules).
+- **Visibility** — a read handle that injects `published = true`, so public endpoints never surface drafts.
+- **Row-level ACLs** — a composite predicate such as `owner_id = me OR shared_with ∋ me`.
+
+The same boundaries apply as for tenancy: it guards tables with rules, on the wrapped handle, in application code — it is not a database-enforced boundary. See [Security model](#security-model).
 
 ## How this relates to RLS
 
