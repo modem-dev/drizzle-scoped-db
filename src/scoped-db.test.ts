@@ -1,4 +1,4 @@
-import { and, type Column, eq, or, type SQL } from "drizzle-orm";
+import { aliasedTable, and, type Column, eq, or, type SQL } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
 import {
   assertDrizzleCompatibility,
@@ -28,6 +28,12 @@ const tasksTbl = pgTable("tasks", {
 const usersTbl = pgTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull(),
+});
+
+const projectsAuditTbl = pgTable("projects_audit", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  projectId: text("project_id").notNull(),
 });
 
 type FakeDbState = {
@@ -774,5 +780,77 @@ describe("createScopedDb", () => {
     expect(() => scopeByColumn(projectsTbl, {} as Column)).toThrow(
       "Unable to infer Drizzle column name",
     );
+  });
+
+  it("rejects same-named columns that belong to a different table in strict mode", () => {
+    const scopedDb = createScopedDb(createFakeDb(), {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    // projectsAuditTbl shares the "workspace_id" column name with projectsTbl.
+    // Strict validation must reject this because the WHERE clause does not
+    // actually filter the scoped table's column.
+    expect(() =>
+      scopedDb.select().from(projectsTbl).where(eq(projectsAuditTbl.workspaceId, "workspace-1")),
+    ).toThrow(MissingScopedPredicateError);
+
+    // Filtering on the correct table's column still passes.
+    expect(() =>
+      scopedDb.select().from(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1")),
+    ).not.toThrow();
+  });
+
+  it("accepts aliased-table column references in strict mode (self-join)", () => {
+    const scopedDb = createScopedDb(createFakeDb(), {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const parent = aliasedTable(projectsTbl, "parent");
+
+    // Filtering on the aliased table's column is a legitimate scope acknowledgment.
+    expect(() =>
+      scopedDb
+        .select()
+        .from(projectsTbl)
+        .leftJoin(parent, eq(parent.id, projectsTbl.regionId))
+        .where(and(eq(parent.workspaceId, "workspace-1"), eq(projectsTbl.id, "p1"))),
+    ).not.toThrow();
+  });
+
+  it("containsColumnFilter disambiguates by table identity when a table is provided", () => {
+    const projectsCondition = eq(projectsTbl.workspaceId, "workspace-1");
+    const auditCondition = eq(projectsAuditTbl.workspaceId, "workspace-1");
+
+    // Without a table, both match by name only (backward-compatible behavior).
+    expect(containsColumnFilter(projectsCondition, "workspace_id")).toBe(true);
+    expect(containsColumnFilter(auditCondition, "workspace_id")).toBe(true);
+
+    // With the scoped table, only the matching table's column satisfies the check.
+    expect(containsColumnFilter(projectsCondition, "workspace_id", projectsTbl)).toBe(true);
+    expect(containsColumnFilter(auditCondition, "workspace_id", projectsTbl)).toBe(false);
+    expect(containsColumnFilter(auditCondition, "workspace_id", projectsAuditTbl)).toBe(true);
+  });
+
+  it("assertDrizzleCompatibility accepts an optional table for stricter checking", () => {
+    expect(() =>
+      assertDrizzleCompatibility(
+        eq(projectsTbl.workspaceId, "workspace-1"),
+        "workspace_id",
+        projectsTbl,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertDrizzleCompatibility(
+        eq(projectsAuditTbl.workspaceId, "workspace-1"),
+        "workspace_id",
+        projectsTbl,
+      ),
+    ).toThrow("workspace_id");
   });
 });
