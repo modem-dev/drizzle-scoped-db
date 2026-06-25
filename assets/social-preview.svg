@@ -1,108 +1,50 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
-  <title id="title">drizzle-scoped-db social preview</title>
-  <desc id="desc">Tenant-scoped Drizzle ORM query handles that fail loud when scope predicates are missing.</desc>
+  <title id="title">drizzle-scoped-db</title>
+  <desc id="desc">Typed and runtime guardrails that stop humans and agents from making cross-tenant queries.</desc>
+
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#07111f"/>
-      <stop offset="0.52" stop-color="#0e172a"/>
-      <stop offset="1" stop-color="#132a24"/>
-    </linearGradient>
-    <radialGradient id="glowA" cx="28%" cy="12%" r="70%">
-      <stop offset="0" stop-color="#84cc16" stop-opacity="0.34"/>
-      <stop offset="0.38" stop-color="#22c55e" stop-opacity="0.12"/>
-      <stop offset="1" stop-color="#22c55e" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="glowB" cx="89%" cy="86%" r="64%">
-      <stop offset="0" stop-color="#38bdf8" stop-opacity="0.24"/>
-      <stop offset="0.5" stop-color="#38bdf8" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#38bdf8" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000000" flood-opacity="0.38"/>
+    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="26" flood-color="#000000" flood-opacity="0.45"/>
     </filter>
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.25"/>
-    </filter>
-    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
-      <path d="M 44 0 L 0 0 0 44" fill="none" stroke="#ffffff" stroke-opacity="0.045" stroke-width="1"/>
-    </pattern>
+    <clipPath id="errClip">
+      <rect x="744" y="332" width="400" height="92" rx="12"/>
+    </clipPath>
   </defs>
 
-  <rect width="1280" height="640" fill="url(#bg)"/>
-  <rect width="1280" height="640" fill="url(#glowA)"/>
-  <rect width="1280" height="640" fill="url(#glowB)"/>
-  <rect width="1280" height="640" fill="url(#grid)" opacity="0.9"/>
+  <!-- flat background -->
+  <rect width="1280" height="640" fill="#0B0F14"/>
 
-  <g transform="translate(72 72)">
-    <rect x="0" y="0" width="1136" height="496" rx="38" fill="#0b1220" fill-opacity="0.78" stroke="#ffffff" stroke-opacity="0.12" filter="url(#shadow)"/>
-    <rect x="1" y="1" width="1134" height="494" rx="37" fill="none" stroke="#84cc16" stroke-opacity="0.16"/>
+  <!-- wordmark: "scoped" carries the value -->
+  <text x="104" y="150" font-family="Adwaita Sans, sans-serif" font-size="36" font-weight="800" letter-spacing="-0.5">
+    <tspan fill="#C7D0DA">drizzle-</tspan><tspan fill="#A3E635">scoped</tspan><tspan fill="#C7D0DA">-db</tspan>
+  </text>
+
+  <!-- headline: red = what it catches -->
+  <g font-family="Adwaita Sans, sans-serif" font-size="36" font-weight="800" letter-spacing="-0.5">
+    <text x="104" y="270" fill="#E8EDF3">Typed + runtime guardrails</text>
+    <text x="104" y="318" fill="#E8EDF3">that catch accidental</text>
+    <text x="104" y="366" fill="#FF7A7A">cross-tenant queries</text>
   </g>
 
-  <g transform="translate(112 112)">
-    <g filter="url(#softShadow)">
-      <rect x="0" y="0" width="86" height="86" rx="24" fill="#101d2f" stroke="#84cc16" stroke-opacity="0.48"/>
-      <path d="M43 16 C30 16 22 21 22 28 V44 C22 59 31 69 43 74 C55 69 64 59 64 44 V28 C64 21 56 16 43 16 Z" fill="#84cc16" fill-opacity="0.16" stroke="#a3e635" stroke-width="4" stroke-linejoin="round"/>
-      <path d="M33 43 L40 50 L55 34" fill="none" stroke="#d9f99d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    </g>
+  <!-- ecosystem -->
+  <text x="104" y="416" font-family="Adwaita Sans, sans-serif" font-size="22" font-weight="600" fill="#8893A0" letter-spacing="0">for <tspan fill="#C7D0DA">Drizzle ORM</tspan></text>
 
-    <text x="116" y="38" fill="#d9f99d" font-family="DejaVu Sans, Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="3">@modemdev</text>
-    <text x="116" y="91" fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="58" font-weight="800">drizzle-scoped-db</text>
-
-    <text x="0" y="174" fill="#f8fafc" font-family="DejaVu Sans, Arial, sans-serif" font-size="46" font-weight="800">
-      Tenant-scoped Drizzle
-    </text>
-    <text x="0" y="230" fill="#a3e635" font-family="DejaVu Sans, Arial, sans-serif" font-size="46" font-weight="800">
-      that fails loud.
-    </text>
-
-    <g transform="translate(0 286)" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" font-weight="700">
-      <g>
-        <rect x="0" y="0" width="214" height="48" rx="24" fill="#84cc16" fill-opacity="0.14" stroke="#a3e635" stroke-opacity="0.34"/>
-        <text x="24" y="31" fill="#ecfccb">strict by default</text>
-      </g>
-      <g transform="translate(236 0)">
-        <rect x="0" y="0" width="224" height="48" rx="24" fill="#38bdf8" fill-opacity="0.12" stroke="#7dd3fc" stroke-opacity="0.28"/>
-        <text x="24" y="31" fill="#e0f2fe">joins + mutations</text>
-      </g>
-      <g transform="translate(478 0)">
-        <rect x="0" y="0" width="194" height="48" rx="24" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.16"/>
-        <text x="24" y="31" fill="#e2e8f0">DB-agnostic</text>
-      </g>
-    </g>
-
-    <text x="0" y="394" fill="#94a3b8" font-family="DejaVu Sans, Arial, sans-serif" font-size="24" font-weight="600">
-      Typed app-layer guardrails for multi-tenant ORM apps.
-    </text>
+  <!-- code proof panel -->
+  <g filter="url(#panelShadow)">
+    <rect x="708" y="168" width="468" height="296" rx="20" fill="#0F141A" stroke="#FFFFFF" stroke-opacity="0.07"/>
   </g>
+  <g font-family="JetBrainsMono Nerd Font Mono, monospace" font-size="21">
+    <text x="740" y="220" fill="#5E6B79" font-weight="500">// missing the tenant filter</text>
+    <text x="740" y="266" font-weight="600" xml:space="preserve"><tspan fill="#7C8896">await </tspan><tspan fill="#A3E635">tenantDb</tspan></text>
+    <text x="740" y="300" font-weight="600"><tspan fill="#7C8896">  .select().from(</tspan><tspan fill="#D4DCE4">projects</tspan><tspan fill="#7C8896">)</tspan></text>
 
-  <g transform="translate(790 150)" filter="url(#shadow)">
-    <rect x="0" y="0" width="382" height="346" rx="24" fill="#020617" stroke="#ffffff" stroke-opacity="0.12"/>
-    <rect x="0" y="0" width="382" height="52" rx="24" fill="#101827"/>
-    <path d="M0 28 Q0 0 28 0 H354 Q382 0 382 28 V52 H0 Z" fill="#101827"/>
-    <circle cx="31" cy="26" r="7" fill="#fb7185"/>
-    <circle cx="57" cy="26" r="7" fill="#fbbf24"/>
-    <circle cx="83" cy="26" r="7" fill="#84cc16"/>
-
-    <g font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="20" font-weight="700">
-      <text x="28" y="94" fill="#7dd3fc">const</text>
-      <text x="88" y="94" fill="#e2e8f0">workspaceDb</text>
-      <text x="224" y="94" fill="#94a3b8">=</text>
-      <text x="246" y="94" fill="#a3e635">createScopedDb</text>
-      <text x="28" y="126" fill="#94a3b8">  (db, { scope: </text>
-      <text x="216" y="126" fill="#fde68a">tenantId</text>
-      <text x="306" y="126" fill="#94a3b8"> })</text>
-
-      <text x="28" y="188" fill="#c084fc">await</text>
-      <text x="92" y="188" fill="#e2e8f0">workspaceDb</text>
-      <text x="28" y="220" fill="#94a3b8">  .select().from(projects)</text>
-
-      <rect x="22" y="250" width="338" height="58" rx="14" fill="#7f1d1d" fill-opacity="0.42" stroke="#f87171" stroke-opacity="0.42"/>
-      <text x="42" y="286" fill="#fecaca">MissingScopedWhereError</text>
+    <!-- error tag -->
+    <g clip-path="url(#errClip)">
+      <rect x="744" y="332" width="400" height="92" fill="#FF7A7A" fill-opacity="0.08"/>
+      <rect x="744" y="332" width="5" height="92" fill="#FF7A7A"/>
     </g>
-  </g>
-
-  <g transform="translate(112 542)" opacity="0.92">
-    <text x="0" y="0" fill="#cbd5e1" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" font-weight="700">npm i</text>
-    <text x="68" y="0" fill="#a3e635" font-family="DejaVu Sans Mono, Menlo, Consolas, monospace" font-size="22" font-weight="700">@modemdev/drizzle-scoped-db</text>
+    <rect x="744" y="332" width="400" height="92" rx="12" fill="none" stroke="#FF7A7A" stroke-opacity="0.30"/>
+    <text x="772" y="372" font-size="20" font-weight="700" fill="#FF9090">MissingScopedWhereError</text>
+    <text x="772" y="400" font-size="16" font-weight="500" fill="#B98686">caught at the call site, not in prod</text>
   </g>
 </svg>
