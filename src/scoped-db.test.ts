@@ -1,4 +1,4 @@
-import { and, type Column, eq, or, type SQL } from "drizzle-orm";
+import { aliasedTable, and, type Column, eq, or, type SQL } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
 import {
   assertDrizzleCompatibility,
@@ -800,6 +800,26 @@ describe("createScopedDb", () => {
     // Filtering on the correct table's column still passes.
     expect(() =>
       scopedDb.select().from(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1")),
+    ).not.toThrow();
+  });
+
+  it("accepts aliased-table column references in strict mode (self-join)", () => {
+    const scopedDb = createScopedDb(createFakeDb(), {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const parent = aliasedTable(projectsTbl, "parent");
+
+    // Filtering on the aliased table's column is a legitimate scope acknowledgment.
+    expect(() =>
+      scopedDb
+        .select()
+        .from(projectsTbl)
+        .leftJoin(parent, eq(parent.id, projectsTbl.regionId))
+        .where(and(eq(parent.workspaceId, "workspace-1"), eq(projectsTbl.id, "p1"))),
     ).not.toThrow();
   });
 
