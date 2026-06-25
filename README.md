@@ -7,7 +7,11 @@
 
 **One forgotten `WHERE tenant_id = ...` leaks another tenant's rows. `drizzle-scoped-db` makes that mistake throw instead of ship.**
 
-It wraps a Drizzle ORM handle in a typed, tenant-scoped one (`tenantDb`, `workspaceDb`, `organizationDb`). Scope predicates are injected into your queries automatically, and in strict mode a scoped query that forgets the tenant predicate throws at the call site, before it reaches the database.
+<p align="center">
+  <img src="./assets/before-after.png" width="820" alt="With a plain Drizzle handle a forgotten org filter silently returns every org's rows; with a drizzle-scoped-db handle the same query throws MissingScopedWhereError, caught before it ships." />
+</p>
+
+It wraps a Drizzle ORM handle in a typed, scoped one (`orgDb`, `tenantDb`, `workspaceDb`). The guardrail fits any predicate a query must never forget: tenant, org, user, region, soft-delete. Scope predicates are injected into your queries automatically, and in strict mode a scoped query that forgets its predicate throws at the call site, before it reaches the database.
 
 ```ts
 // Throws MissingScopedWhereError instead of returning every tenant's projects
@@ -45,6 +49,19 @@ RLS gives you a boundary the application can't bypass, but it lives in the datab
 - Inject scope predicates into supported selects, joins, mutations, and relational root queries.
 - Validate scoped inserts before they reach the database.
 - Catch missing predicates in human-written, generated, or agent-authored code.
+
+## Use cases
+
+`drizzle-scoped-db` is a guardrail for any predicate a query must never forget. The scope is whatever you express as a Drizzle `where`:
+
+- **Tenant or org isolation.** Keep `tenant_id = currentTenant` on every query so one customer never sees another's rows.
+- **Per-user data.** Force `user_id = currentUser` on private rows.
+- **Region or data residency.** Keep `region = 'eu'` on every query.
+- **Soft deletes.** Always exclude deleted rows with `isNull(table.deletedAt)` via [`defineScopedTable`](#custom-scope-rules).
+- **Visibility.** A read handle that injects `published = true`, so public endpoints never surface drafts.
+- **Row-level ACLs.** A composite predicate such as `owner_id = me OR shared_with @> me`.
+
+These share the same boundaries: the guardrail covers tables with rules, on the wrapped handle, in application code, not as a database-enforced boundary. See [Security model](#security-model).
 
 ## How this relates to RLS
 
