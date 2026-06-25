@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
   <title id="title">drizzle-scoped-db</title>
-  <desc id="desc">Typed and runtime guardrails that stop humans and agents from making cross-tenant queries.</desc>
+  <desc id="desc">Typed and runtime guardrails that catch accidental unscoped queries in Drizzle ORM.</desc>
 
   <defs>
     <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="160%">
@@ -23,7 +23,7 @@
   <g font-family="Adwaita Sans, sans-serif" font-size="36" font-weight="800" letter-spacing="-0.5">
     <text x="104" y="270" fill="#E8EDF3">Typed + runtime guardrails</text>
     <text x="104" y="318" fill="#E8EDF3">that catch accidental</text>
-    <text x="104" y="366" fill="#FF7A7A">cross-tenant queries</text>
+    <text x="104" y="366" fill="#FF7A7A">unscoped queries</text>
   </g>
 
   <!-- ecosystem -->
@@ -34,8 +34,8 @@
     <rect x="708" y="168" width="468" height="296" rx="20" fill="#0F141A" stroke="#FFFFFF" stroke-opacity="0.07"/>
   </g>
   <g font-family="JetBrainsMono Nerd Font Mono, monospace" font-size="21">
-    <text x="740" y="220" fill="#5E6B79" font-weight="500">// missing the tenant filter</text>
-    <text x="740" y="266" font-weight="600" xml:space="preserve"><tspan fill="#7C8896">await </tspan><tspan fill="#A3E635">tenantDb</tspan></text>
+    <text x="740" y="220" fill="#5E6B79" font-weight="500">// missing the org filter</text>
+    <text x="740" y="266" font-weight="600" xml:space="preserve"><tspan fill="#7C8896">await </tspan><tspan fill="#A3E635">orgDb</tspan></text>
     <text x="740" y="300" font-weight="600"><tspan fill="#7C8896">  .select().from(</tspan><tspan fill="#D4DCE4">projects</tspan><tspan fill="#7C8896">)</tspan></text>
 
     <!-- error tag -->

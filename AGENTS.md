@@ -2,7 +2,7 @@
 
 ## Project
 
-`drizzle-scoped-db` is a TypeScript library that wraps Drizzle ORM database handles with typed tenant/scope guardrails.
+`drizzle-scoped-db` is a TypeScript library that wraps Drizzle ORM database handles with typed scope guardrails. The scope can be a tenant, org, user, region, soft-delete flag, or any predicate a query must never forget.
 
 ## Important files
 
