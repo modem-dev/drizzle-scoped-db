@@ -22,6 +22,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Fixed
 
+- Scoped join protection is now applied even when the root table is unscoped, preventing scope leaks when starting queries from unscoped tables and joining scoped ones.
 - Strict-mode scope detection now matches the table's original (pre-alias) name in addition to the column name, preventing false positives when a joined table shares a column name with the scoped table while remaining safe for aliased self-joins.
 
 ## [0.6.0] - 2026-06-23
