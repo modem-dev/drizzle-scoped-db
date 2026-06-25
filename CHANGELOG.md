@@ -6,6 +6,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Added
 
+- Add repository social preview artwork for Open Graph/Twitter cards.
 - Add release benchmark snapshots and a release workflow gate for performance and heap-growth regressions.
 - Inject scope predicates for joined tables with declared rules in select query builders.
 
