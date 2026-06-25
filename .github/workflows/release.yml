@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      allow_benchmark_regression:
+        description: Allow a manual release despite a material benchmark regression
+        required: true
+        default: false
+        type: boolean
+      benchmark_regression_reason:
+        description: Required reason when allowing a benchmark regression
+        required: false
+        default: ""
+        type: string
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-benchmark-gate:
+    name: Release benchmark gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Verify tag matches package version
+        if: github.event_name == 'push'
+        run: pnpm check:release-version "${{ github.ref_name }}"
+      - name: Compare release benchmark snapshot
+        id: benchmark-gate
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_benchmark_regression }}
+        run: |
+          mkdir -p dist/release
+          pnpm bench:release:compare -- \
+            --out dist/release/benchmark-comparison.json \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - name: Require benchmark override reason
+        if: ${{ steps.benchmark-gate.outcome == 'failure' && github.event_name == 'workflow_dispatch' && inputs.allow_benchmark_regression }}
+        env:
+          BENCHMARK_REGRESSION_REASON: ${{ inputs.benchmark_regression_reason }}
+        run: |
+          if [ -z "$BENCHMARK_REGRESSION_REASON" ]; then
+            echo "benchmark_regression_reason is required when allow_benchmark_regression is true." >&2
+            exit 1
+          fi
+          {
+            echo
+            echo "## Benchmark regression override"
+            echo
+            echo "Manual override reason: $BENCHMARK_REGRESSION_REASON"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload benchmark comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-benchmark-comparison
+          path: dist/release/benchmark-comparison.json
+          if-no-files-found: ignore

@@ -38,7 +38,10 @@
     "access": "public"
   },
   "scripts": {
+    "bench:release": "pnpm build && node --expose-gc benchmarks/run-release.mjs",
+    "bench:release:compare": "node scripts/compare-release-benchmarks.mjs",
     "build": "tsc -p tsconfig.build.json",
+    "check:release-version": "node scripts/check-release-version.mjs",
     "coverage": "vitest run --typecheck --coverage",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
