@@ -741,11 +741,13 @@ describe("createScopedDb", () => {
     const result = scopedDb
       .select()
       .from(projectsTbl)
-      .where(eq(projectsTbl.id, "project-1")) as unknown as Record<string, unknown>;
+      .where(eq(projectsTbl.id, "project-1")) as unknown as {
+      where: (condition: SQL | undefined) => unknown;
+    };
 
-    // The scoped where-builder facade must not expose .where() — that would
-    // allow overwriting the injected scope predicate (Drizzle overwrites, not ANDs).
-    expect(typeof result.where).toBe("undefined");
+    // A second .where() must not be callable — Drizzle overwrites (not ANDs),
+    // so allowing it would silently drop the injected scope predicate.
+    expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
 
     // Scope predicate was injected and not overwritten.
     expect(rawDb._state.selectCondition).toBeDefined();
@@ -768,10 +770,12 @@ describe("createScopedDb", () => {
       .where(eq(projectsTbl.id, "project-1"))
       .limit(10)
       .offset(5)
-      .orderBy(projectsTbl.id) as unknown as Record<string, unknown>;
+      .orderBy(projectsTbl.id) as unknown as {
+      where: (condition: SQL | undefined) => unknown;
+    };
 
-    // No .where() exposed after chaining terminal methods.
-    expect(typeof result.where).toBe("undefined");
+    // .where() still not reachable after chaining terminal methods.
+    expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
     expect(rawDb._state.selectCondition).toBeDefined();
     expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
   });
@@ -788,9 +792,11 @@ describe("createScopedDb", () => {
     const result = scopedDb
       .update(projectsTbl)
       .set({ name: "Updated" })
-      .where(eq(projectsTbl.id, "project-1")) as unknown as Record<string, unknown>;
+      .where(eq(projectsTbl.id, "project-1")) as unknown as {
+      where: (condition: SQL | undefined) => unknown;
+    };
 
-    expect(typeof result.where).toBe("undefined");
+    expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
     expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
   });
 
@@ -827,9 +833,11 @@ describe("createScopedDb", () => {
 
     const result = scopedDb
       .delete(projectsTbl)
-      .where(eq(projectsTbl.id, "project-1")) as unknown as Record<string, unknown>;
+      .where(eq(projectsTbl.id, "project-1")) as unknown as {
+      where: (condition: SQL | undefined) => unknown;
+    };
 
-    expect(typeof result.where).toBe("undefined");
+    expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
     expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
   });
 
