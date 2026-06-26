@@ -67,10 +67,6 @@ export function createScopedSelectBuilder<TScope, TSelection>(
       const fromBuilder = selectBuilder.from(table);
       const rule = options.rulesByTable.get(table);
 
-      if (!rule) {
-        return fromBuilder;
-      }
-
       // oxlint-disable-next-line typescript/no-explicit-any -- Return type depends on selection and table inference.
       return createScopedFromBuilder(fromBuilder, rule, options) as any;
     },
@@ -85,7 +81,7 @@ function createScopedFromBuilder<
 >(
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
   builder: any,
-  rootRule: ScopedTableRule<TScope, TTable>,
+  rootRule: ScopedTableRule<TScope, TTable> | undefined,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): ScopedQueryBuilder<TTable, TResult> {
   return {
@@ -120,10 +116,9 @@ function createScopedFromBuilder<
       onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2> {
       assertWhereAllowed(undefined, rootRule, options);
-      return Promise.resolve(builder.where(scopeCondition(undefined, rootRule, options))).then(
-        onfulfilled,
-        onrejected,
-      );
+      const cond = scopeCondition(undefined, rootRule, options);
+      const query = cond ? builder.where(cond) : builder;
+      return Promise.resolve(query).then(onfulfilled, onrejected);
     },
   };
 }

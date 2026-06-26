@@ -535,6 +535,44 @@ describe("createScopedDb", () => {
     expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "task_workspace_id")).toBe(false);
   });
 
+  it("injects scope predicates for joined tables even when the root table is unscoped", async () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    // usersTbl is unscoped (root table), projectsTbl is scoped (joined table)
+    await (scopedDb
+      .select()
+      .from(usersTbl)
+      .leftJoin(projectsTbl, eq(projectsTbl.id, usersTbl.id))
+      .where(eq(usersTbl.id, "user-1")) as unknown as Promise<unknown>);
+
+    expect(rawDb._state.selectCondition).toBeDefined();
+    // The root table (usersTbl) has no rule, so workspace_id should not be in the where clause
+    expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(false);
+    expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(true);
+
+    // The joined table (projectsTbl) has a rule, so workspace_id should be in the join condition
+    expect(rawDb._state.joinConditions).toHaveLength(1);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "workspace_id")).toBe(true);
+  });
+
+  it("allows direct await on unscoped root table select without where", async () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    await (scopedDb.select().from(usersTbl) as unknown as Promise<unknown>);
+    expect(rawDb._state.selectCondition).toBeUndefined();
+  });
+
   it("covers selected-column distinct builders and join wrappers", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {

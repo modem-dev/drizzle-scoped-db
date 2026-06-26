@@ -11,9 +11,13 @@ import type { NormalizedCreateScopedDbOptions } from "./options.js";
 /** Validate required user-supplied where shape for a scoped table. */
 export function assertWhereAllowed<TScope>(
   condition: SQL | undefined,
-  rule: ScopedTableRule<TScope>,
+  rule: ScopedTableRule<TScope> | undefined,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): void {
+  if (!rule) {
+    return;
+  }
+
   if (!condition && isStrictMode(options)) {
     throw createMissingWhereError(getRuleTableName(rule), options);
   }
@@ -45,9 +49,12 @@ export function scopeJoinCondition<TScope>(
 /** Combine a user condition with one table's declared scope predicate. */
 export function scopeCondition<TScope>(
   condition: SQL | undefined,
-  rule: ScopedTableRule<TScope>,
+  rule: ScopedTableRule<TScope> | undefined,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): SQL | undefined {
+  if (!rule) {
+    return condition;
+  }
   const scopedPredicate = rule.where(options.scopeValue);
   if (!condition) {
     return scopedPredicate;
