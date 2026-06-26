@@ -138,24 +138,56 @@ export interface ScopedSelectBuilder<TSelection = undefined> {
   >;
 }
 
+/**
+ * Terminal result of a scoped insert/update/delete. Always awaitable, and—only when the
+ * underlying dialect's builder exposes a RETURNING clause (Postgres/SQLite, not MySQL)—chainable
+ * with `.returning(...)`. The `returning` signature is passed through verbatim from the raw
+ * builder, so column projections and row types stay accurate per dialect.
+ */
+export type ScopedMutationResult<TRaw = unknown> = PromiseLike<Awaited<TRaw>> &
+  ([TRaw] extends [{ returning: infer TReturning }] ? { returning: TReturning } : {});
+
+/** Raw builder type a dialect returns from `db.insert(table).values(...)`. */
+export type RawInsertResult<TDb> = TDb extends { insert: (...args: never[]) => infer TInsert }
+  ? TInsert extends { values: (...args: never[]) => infer TResult }
+    ? TResult
+    : unknown
+  : unknown;
+
+/** Raw builder type a dialect returns from `db.update(table).set(...).where(...)`. */
+export type RawUpdateResult<TDb> = TDb extends { update: (...args: never[]) => infer TUpdate }
+  ? TUpdate extends { set: (...args: never[]) => infer TSet }
+    ? TSet extends { where: (...args: never[]) => infer TResult }
+      ? TResult
+      : unknown
+    : unknown
+  : unknown;
+
+/** Raw builder type a dialect returns from `db.delete(table).where(...)`. */
+export type RawDeleteResult<TDb> = TDb extends { delete: (...args: never[]) => infer TDelete }
+  ? TDelete extends { where: (...args: never[]) => infer TResult }
+    ? TResult
+    : unknown
+  : unknown;
+
 /** Minimal insert builder facade exposed by scoped DB wrappers. */
-export interface ScopedInsertBuilder {
-  values(values: Record<string, unknown> | Record<string, unknown>[]): unknown;
+export interface ScopedInsertBuilder<TRaw = unknown> {
+  values(values: Record<string, unknown> | Record<string, unknown>[]): ScopedMutationResult<TRaw>;
 }
 
 /** Minimal update builder facade exposed by scoped DB wrappers. */
-export interface ScopedUpdateBuilder {
-  set(values: Record<string, unknown>): ScopedUpdateWhereBuilder;
+export interface ScopedUpdateBuilder<TRaw = unknown> {
+  set(values: Record<string, unknown>): ScopedUpdateWhereBuilder<TRaw>;
 }
 
 /** Builder facade returned after `.set(...)` is called. */
-export interface ScopedUpdateWhereBuilder {
-  where(condition: SQL | undefined): unknown;
+export interface ScopedUpdateWhereBuilder<TRaw = unknown> {
+  where(condition: SQL | undefined): ScopedMutationResult<TRaw>;
 }
 
 /** Minimal delete builder facade exposed by scoped DB wrappers. */
-export interface ScopedDeleteBuilder {
-  where(condition: SQL | undefined): unknown;
+export interface ScopedDeleteBuilder<TRaw = unknown> {
+  where(condition: SQL | undefined): ScopedMutationResult<TRaw>;
 }
 
 /** Surface exposed by scoped Drizzle database wrappers. */
@@ -184,11 +216,11 @@ export type ScopedDb<
       : undefined
     : undefined;
   /** Insert into a scoped table. */
-  insert<TTable extends ScopedTable>(table: TTable): ScopedInsertBuilder;
+  insert<TTable extends ScopedTable>(table: TTable): ScopedInsertBuilder<RawInsertResult<TDb>>;
   /** Update a scoped table. */
-  update<TTable extends ScopedTable>(table: TTable): ScopedUpdateBuilder;
+  update<TTable extends ScopedTable>(table: TTable): ScopedUpdateBuilder<RawUpdateResult<TDb>>;
   /** Delete from a scoped table. */
-  delete<TTable extends ScopedTable>(table: TTable): ScopedDeleteBuilder;
+  delete<TTable extends ScopedTable>(table: TTable): ScopedDeleteBuilder<RawDeleteResult<TDb>>;
   /** Start a scoped transaction. */
   transaction<T>(
     callback: (

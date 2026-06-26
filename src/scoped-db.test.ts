@@ -4,6 +4,7 @@ import {
   assertDrizzleCompatibility,
   containsColumnFilter,
   createScopedDb,
+  type ScopedDb,
   defineScopedTable,
   InvalidScopedInsertError,
   InvalidScopedUpdateError,
@@ -93,19 +94,20 @@ type FakeDb = {
   select(columns?: Record<string, unknown>): FakeSelectBuilder;
   selectDistinct(columns?: Record<string, unknown>): FakeSelectBuilder;
   selectDistinctOn(onColumns: unknown[], columns?: Record<string, unknown>): FakeSelectBuilder;
-  insert(table: unknown): { values(values: unknown): { values: unknown }; returning(): unknown };
+  insert(table: unknown): {
+    values(values: unknown): { values: unknown; returning(): unknown };
+  };
   update(table: unknown): {
     set(values: Record<string, unknown>): {
       where(condition: SQL | undefined): {
         condition: SQL | undefined;
         values: Record<string, unknown>;
+        returning(): unknown;
       };
-      returning(): unknown;
     };
   };
   delete(table: unknown): {
-    where(condition: SQL | undefined): { condition: SQL | undefined };
-    returning(): unknown;
+    where(condition: SQL | undefined): { condition: SQL | undefined; returning(): unknown };
   };
   transaction<T>(callback: (tx: FakeDb) => Promise<T>): Promise<T>;
   execute(): undefined;
@@ -151,10 +153,12 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
       return {
         values(values: unknown) {
           state.insertValues = values;
-          return { values };
-        },
-        returning() {
-          return undefined;
+          return {
+            values,
+            returning() {
+              return undefined;
+            },
+          };
         },
       };
     },
@@ -164,10 +168,13 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
           return {
             where(condition: SQL | undefined) {
               state.updateCondition = condition;
-              return { condition, values };
-            },
-            returning() {
-              return undefined;
+              return {
+                condition,
+                values,
+                returning() {
+                  return undefined;
+                },
+              };
             },
           };
         },
@@ -177,10 +184,12 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
       return {
         where(condition: SQL | undefined) {
           state.deleteCondition = condition;
-          return { condition };
-        },
-        returning() {
-          return undefined;
+          return {
+            condition,
+            returning() {
+              return undefined;
+            },
+          };
         },
       };
     },
@@ -553,9 +562,9 @@ describe("createScopedDb", () => {
     });
 
     rawDb.select().from(projectsTbl).prepare();
-    rawDb.insert(projectsTbl).returning();
-    rawDb.update(projectsTbl).set({ name: "Updated" }).returning();
-    rawDb.delete(projectsTbl).returning();
+    rawDb.insert(projectsTbl).values({ id: "raw" }).returning();
+    rawDb.update(projectsTbl).set({ name: "Updated" }).where(undefined).returning();
+    rawDb.delete(projectsTbl).where(undefined).returning();
 
     expect(scopedDb.query.projects).toBeDefined();
 
@@ -593,6 +602,18 @@ describe("createScopedDb", () => {
     // @ts-expect-error Scoped delete builders only expose where().
     void deleteBuilder.returning;
 
+    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause.
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .returning();
+    scopedDb
+      .update(projectsTbl)
+      .set({ name: "Updated" })
+      .where(eq(projectsTbl.id, "p"))
+      .returning();
+    scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "p")).returning();
+
     await scopedDb.transaction(async (tx) => {
       tx.select().from(projectsTbl).where(eq(projectsTbl.id, "project-4"));
       await tx.query.projects.findFirst({
@@ -602,6 +623,30 @@ describe("createScopedDb", () => {
       // @ts-expect-error Transaction-scoped builders stay narrowed too.
       void tx.select().from(projectsTbl).prepare;
     });
+  });
+
+  it("omits returning() on scoped mutations for dialects without a RETURNING clause", () => {
+    // A MySQL-shaped DB: its mutation builders resolve to row-count metadata, not RETURNING rows.
+    type MySqlLikeDb = {
+      insert(table: unknown): { values(values: unknown): { rowsAffected: number } };
+      update(table: unknown): {
+        set(values: Record<string, unknown>): {
+          where(condition: SQL | undefined): { rowsAffected: number };
+        };
+      };
+      delete(table: unknown): { where(condition: SQL | undefined): { rowsAffected: number } };
+    };
+
+    // Type-level assertion only; never invoked at runtime.
+    const _assertNoReturning = (db: ScopedDb<MySqlLikeDb, string>) => {
+      // @ts-expect-error MySQL-style insert builders expose no RETURNING clause.
+      void db.insert(projectsTbl).values({ id: "p" }).returning;
+      // @ts-expect-error MySQL-style update builders expose no RETURNING clause.
+      void db.update(projectsTbl).set({ name: "n" }).where(undefined).returning;
+      // @ts-expect-error MySQL-style delete builders expose no RETURNING clause.
+      void db.delete(projectsTbl).where(undefined).returning;
+    };
+    void _assertNoReturning;
   });
 
   it("handles unscoped tables by returning the underlying Drizzle builders", () => {
