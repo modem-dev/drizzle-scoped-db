@@ -73,6 +73,14 @@ type FakeSelectBuilder = {
   from(table: unknown): FakeFromBuilder;
 };
 
+// Postgres/SQLite-shaped insert result: RETURNING plus chainable conflict resolution.
+type FakeInsertResult = {
+  values: unknown;
+  returning(): unknown;
+  onConflictDoNothing(): FakeInsertResult;
+  onConflictDoUpdate(config: unknown): FakeInsertResult;
+};
+
 type FakeDb = {
   query: {
     projects: {
@@ -95,7 +103,7 @@ type FakeDb = {
   selectDistinct(columns?: Record<string, unknown>): FakeSelectBuilder;
   selectDistinctOn(onColumns: unknown[], columns?: Record<string, unknown>): FakeSelectBuilder;
   insert(table: unknown): {
-    values(values: unknown): { values: unknown; returning(): unknown };
+    values(values: unknown): FakeInsertResult;
   };
   update(table: unknown): {
     set(values: Record<string, unknown>): {
@@ -153,12 +161,19 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
       return {
         values(values: unknown) {
           state.insertValues = values;
-          return {
+          const result: FakeInsertResult = {
             values,
             returning() {
               return undefined;
             },
+            onConflictDoNothing() {
+              return result;
+            },
+            onConflictDoUpdate(_config: unknown) {
+              return result;
+            },
           };
+          return result;
         },
       };
     },
@@ -602,11 +617,21 @@ describe("createScopedDb", () => {
     // @ts-expect-error Scoped delete builders only expose where().
     void deleteBuilder.returning;
 
-    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause.
+    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause and
+    // conflict-resolution chaining (Postgres/SQLite), including chaining returning afterward.
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
       .returning();
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" })
+      .onConflictDoNothing()
+      .returning();
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-3", workspaceId: "workspace-1", name: "Icebox" })
+      .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Icebox" } });
     scopedDb
       .update(projectsTbl)
       .set({ name: "Updated" })
@@ -625,10 +650,17 @@ describe("createScopedDb", () => {
     });
   });
 
-  it("omits returning() on scoped mutations for dialects without a RETURNING clause", () => {
-    // A MySQL-shaped DB: its mutation builders resolve to row-count metadata, not RETURNING rows.
+  it("forwards only the methods a dialect actually exposes (MySQL vs Postgres)", () => {
+    // A MySQL-shaped DB: inserts resolve to row-count metadata with MySQL's own upsert/id
+    // helpers, and have no RETURNING clause or Postgres-style onConflict methods.
     type MySqlLikeDb = {
-      insert(table: unknown): { values(values: unknown): { rowsAffected: number } };
+      insert(table: unknown): {
+        values(values: unknown): {
+          rowsAffected: number;
+          $returningId(): unknown;
+          onDuplicateKeyUpdate(config: unknown): unknown;
+        };
+      };
       update(table: unknown): {
         set(values: Record<string, unknown>): {
           where(condition: SQL | undefined): { rowsAffected: number };
@@ -638,15 +670,22 @@ describe("createScopedDb", () => {
     };
 
     // Type-level assertion only; never invoked at runtime.
-    const _assertNoReturning = (db: ScopedDb<MySqlLikeDb, string>) => {
+    const _assertDialectMethods = (db: ScopedDb<MySqlLikeDb, string>) => {
+      // MySQL's own upsert/id helpers ARE forwarded when present.
+      void db.insert(projectsTbl).values({ id: "p" }).$returningId();
+      void db.insert(projectsTbl).values({ id: "p" }).onDuplicateKeyUpdate({ set: {} });
+
+      // Postgres/SQLite-only methods are NOT invented for MySQL.
       // @ts-expect-error MySQL-style insert builders expose no RETURNING clause.
       void db.insert(projectsTbl).values({ id: "p" }).returning;
+      // @ts-expect-error MySQL-style insert builders have no onConflictDoNothing().
+      void db.insert(projectsTbl).values({ id: "p" }).onConflictDoNothing;
       // @ts-expect-error MySQL-style update builders expose no RETURNING clause.
       void db.update(projectsTbl).set({ name: "n" }).where(undefined).returning;
       // @ts-expect-error MySQL-style delete builders expose no RETURNING clause.
       void db.delete(projectsTbl).where(undefined).returning;
     };
-    void _assertNoReturning;
+    void _assertDialectMethods;
   });
 
   it("handles unscoped tables by returning the underlying Drizzle builders", () => {

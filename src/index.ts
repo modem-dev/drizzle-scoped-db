@@ -15,6 +15,7 @@ export type {
   ScopedDbErrors,
   ScopedDeleteBuilder,
   ScopedInsertBuilder,
+  ScopedInsertResult,
   ScopedMutationResult,
   ScopedQueryBuilder,
   ScopedSelectBuilder,

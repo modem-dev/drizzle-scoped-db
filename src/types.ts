@@ -139,13 +139,37 @@ export interface ScopedSelectBuilder<TSelection = undefined> {
 }
 
 /**
- * Terminal result of a scoped insert/update/delete. Always awaitable, and—only when the
- * underlying dialect's builder exposes a RETURNING clause (Postgres/SQLite, not MySQL)—chainable
- * with `.returning(...)`. The `returning` signature is passed through verbatim from the raw
- * builder, so column projections and row types stay accurate per dialect.
+ * Forwards a single raw-builder method—with its exact, per-dialect signature—onto a scoped
+ * facade, but only when the underlying builder actually provides it. Dialects that lack the
+ * method (for example MySQL has no `returning` or `onConflictDoNothing`) contribute nothing.
+ * The tuple wrapping prevents distribution over unions.
+ */
+export type ForwardMethod<TRaw, TName extends string> = [TRaw] extends [
+  { [K in TName]: infer TMethod },
+]
+  ? { [K in TName]: TMethod }
+  : {};
+
+/**
+ * Terminal result of a scoped update/delete. Always awaitable, and—only when the underlying
+ * dialect's builder exposes a RETURNING clause (Postgres/SQLite, not MySQL)—chainable with
+ * `.returning(...)`. The signature is forwarded verbatim, so column projections and row types
+ * stay accurate per dialect.
  */
 export type ScopedMutationResult<TRaw = unknown> = PromiseLike<Awaited<TRaw>> &
-  ([TRaw] extends [{ returning: infer TReturning }] ? { returning: TReturning } : {});
+  ForwardMethod<TRaw, "returning">;
+
+/**
+ * Terminal result of a scoped insert. Everything {@link ScopedMutationResult} offers, plus the
+ * dialect's upsert/conflict-resolution methods when present: `onConflictDoNothing` /
+ * `onConflictDoUpdate` (Postgres/SQLite) and `onDuplicateKeyUpdate` / `$returningId` (MySQL).
+ * Scope is already injected by `.values(...)`, so chaining these stays guardrail-safe.
+ */
+export type ScopedInsertResult<TRaw = unknown> = ScopedMutationResult<TRaw> &
+  ForwardMethod<TRaw, "onConflictDoNothing"> &
+  ForwardMethod<TRaw, "onConflictDoUpdate"> &
+  ForwardMethod<TRaw, "onDuplicateKeyUpdate"> &
+  ForwardMethod<TRaw, "$returningId">;
 
 /** Raw builder type a dialect returns from `db.insert(table).values(...)`. */
 export type RawInsertResult<TDb> = TDb extends { insert: (...args: never[]) => infer TInsert }
@@ -172,7 +196,7 @@ export type RawDeleteResult<TDb> = TDb extends { delete: (...args: never[]) => i
 
 /** Minimal insert builder facade exposed by scoped DB wrappers. */
 export interface ScopedInsertBuilder<TRaw = unknown> {
-  values(values: Record<string, unknown> | Record<string, unknown>[]): ScopedMutationResult<TRaw>;
+  values(values: Record<string, unknown> | Record<string, unknown>[]): ScopedInsertResult<TRaw>;
 }
 
 /** Minimal update builder facade exposed by scoped DB wrappers. */
