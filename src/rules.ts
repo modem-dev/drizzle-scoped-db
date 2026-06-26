@@ -11,6 +11,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
 ): ScopedTableRule<TScope, TTable> {
   const columnName = options.columnName ?? getColumnName(column);
   const equals = options.equals ?? Object.is;
+  const updateKey = options.updateKey ?? options.insertKey;
 
   return {
     table,
@@ -21,6 +22,14 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
       ? (row, scopeValue) =>
           equals((row as Record<string, unknown>)[options.insertKey as string], scopeValue)
       : undefined,
+    validateUpdate: updateKey
+      ? (payload, scopeValue) => {
+          if (!(updateKey in (payload as Record<string, unknown>))) {
+            return true;
+          }
+          return equals((payload as Record<string, unknown>)[updateKey], scopeValue);
+        }
+      : undefined,
     hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName, table),
   };
 }
@@ -30,10 +39,11 @@ export function defineScopedTable<
   TScope,
   TTable extends ScopedTable,
   TInsert = Record<string, unknown>,
+  TUpdate = Record<string, unknown>,
 >(
   table: TTable,
-  rule: Omit<ScopedTableRule<TScope, TTable, TInsert>, "table">,
-): ScopedTableRule<TScope, TTable, TInsert> {
+  rule: Omit<ScopedTableRule<TScope, TTable, TInsert, TUpdate>, "table">,
+): ScopedTableRule<TScope, TTable, TInsert, TUpdate> {
   return { table, ...rule };
 }
 

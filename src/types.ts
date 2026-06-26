@@ -24,6 +24,7 @@ export type ScopedTableRule<
   TScope,
   TTable extends ScopedTable = ScopedTable,
   TInsert = Record<string, unknown>,
+  TUpdate = Record<string, unknown>,
 > = {
   /** Drizzle table object that this rule protects. */
   table: TTable;
@@ -35,6 +36,8 @@ export type ScopedTableRule<
   where: (scopeValue: TScope) => SQL | undefined;
   /** Optional insert row validator. Return true only when the row belongs to scopeValue. */
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
+  /** Optional update payload validator. Return true only when the updated fields are valid for scopeValue. */
+  validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
   /**
    * Optional strict-mode validator for checking whether user-supplied where already includes scope.
    * Required when `strict` mode is enabled; rules without a detector fail strict validation.
@@ -47,6 +50,12 @@ export type ScopedDbErrors<TScope> = {
   missingWhere?: (tableName: string, scopeName: string, scopeValue: TScope) => Error;
   missingScope?: (tableName: string, scopeName: string, scopeValue: TScope) => Error;
   invalidInsert?: (
+    tableName: string,
+    row: Record<string, unknown>,
+    scopeName: string,
+    scopeValue: TScope,
+  ) => Error;
+  invalidUpdate?: (
     tableName: string,
     row: Record<string, unknown>,
     scopeName: string,
@@ -87,6 +96,8 @@ export type ScopeByColumnOptions<TScope> = {
   tableName?: string;
   /** Insert row property that should equal the current scope value. */
   insertKey?: string;
+  /** Update payload property that should equal the current scope value if present. Defaults to `insertKey`. */
+  updateKey?: string;
   /** SQL column name used by strict validation. Defaults to the Drizzle column name. */
   columnName?: string;
   /** Custom equality function for insert validation. Defaults to Object.is. */

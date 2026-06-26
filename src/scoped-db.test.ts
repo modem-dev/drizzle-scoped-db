@@ -6,6 +6,7 @@ import {
   createScopedDb,
   defineScopedTable,
   InvalidScopedInsertError,
+  InvalidScopedUpdateError,
   MissingScopedPredicateError,
   MissingScopedWhereError,
   scopeByColumn,
@@ -336,6 +337,79 @@ describe("createScopedDb", () => {
         .insert(projectsTbl)
         .values({ id: "project-2", workspaceId: "workspace-2", name: "Wrong" }),
     ).toThrow(InvalidScopedInsertError);
+  });
+
+  it("validates update payloads when an insertKey is declared as a fallback for updateKey", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    // Valid: updating a non-scope column
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ name: "Updated Roadmap" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).not.toThrow();
+
+    // Valid: updating the scope column to the matching scope value
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ workspaceId: "workspace-1" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).not.toThrow();
+
+    // Invalid: updating the scope column to a different scope value
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ workspaceId: "workspace-2" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).toThrow(InvalidScopedUpdateError);
+  });
+
+  it("validates update payloads when a custom updateKey is declared", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [
+        scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+          insertKey: "workspaceId",
+          updateKey: "customWorkspaceKey",
+        }),
+      ],
+    });
+
+    // Valid: customWorkspaceKey matches scope value
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ customWorkspaceKey: "workspace-1" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).not.toThrow();
+
+    // Invalid: customWorkspaceKey has different scope value
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ customWorkspaceKey: "workspace-2" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).toThrow(InvalidScopedUpdateError);
+
+    // Valid: insertKey is ignored for updates when updateKey is declared
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ workspaceId: "workspace-2" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).not.toThrow();
   });
 
   it("wraps relational query methods when a rule declares the query property name", async () => {
@@ -694,6 +768,7 @@ describe("createScopedDb", () => {
     const customMissingWhere = new Error("custom missing where");
     const customMissingScope = new Error("custom missing scope");
     const customInvalidInsert = new Error("custom invalid insert");
+    const customInvalidUpdate = new Error("custom invalid update");
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
@@ -715,6 +790,7 @@ describe("createScopedDb", () => {
         },
         missingScope: () => customMissingScope,
         invalidInsert: () => customInvalidInsert,
+        invalidUpdate: () => customInvalidUpdate,
       },
     });
 
@@ -728,6 +804,12 @@ describe("createScopedDb", () => {
         .insert(projectsTbl)
         .values({ id: "project-1", workspaceId: "workspace-2", name: "Wrong" }),
     ).toThrow(customInvalidInsert);
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ workspaceId: "workspace-2" })
+        .where(eq(projectsTbl.id, "project-1")),
+    ).toThrow(customInvalidUpdate);
   });
 
   it("throws the default missing-scope error when strict mode is enabled for a custom rule without a scope detector", () => {
