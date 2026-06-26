@@ -53,9 +53,11 @@ type RelationalProjectWhere =
 
 type FakeWhereResult = {
   condition: SQL | undefined;
-  limit(): FakeWhereResult;
-  offset(): FakeWhereResult;
-  orderBy(): FakeWhereResult;
+  where(condition: SQL | undefined): FakeWhereResult;
+  limit(n?: number): FakeWhereResult;
+  offset(n?: number): FakeWhereResult;
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+  orderBy(...columns: any[]): FakeWhereResult;
 };
 
 type FakeFromBuilder = {
@@ -205,20 +207,27 @@ function createSelectBuilder(state: FakeDbState): FakeSelectBuilder {
 /** Creates a minimal from builder that records the final where predicate. */
 function createFromBuilder(state: FakeDbState): FakeFromBuilder {
   const builder = {
-    where(condition: SQL | undefined) {
+    where(condition: SQL | undefined): FakeWhereResult {
       state.selectCondition = condition;
-      return {
+      const result: FakeWhereResult = {
         condition,
-        limit(): FakeWhereResult {
-          return this;
+        // Drizzle's where() overwrites config.where (does not AND).
+        where(condition2: SQL | undefined): FakeWhereResult {
+          state.selectCondition = condition2;
+          return result;
         },
-        offset(): FakeWhereResult {
-          return this;
+        limit(_n?: number): FakeWhereResult {
+          return result;
         },
-        orderBy(): FakeWhereResult {
-          return this;
+        offset(_n?: number): FakeWhereResult {
+          return result;
+        },
+        // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+        orderBy(..._columns: any[]): FakeWhereResult {
+          return result;
         },
       };
+      return result;
     },
     leftJoin(_table: unknown, on: SQL): FakeFromBuilder {
       state.joinConditions = [...(state.joinConditions ?? []), on];
@@ -718,6 +727,110 @@ describe("createScopedDb", () => {
     expect(() => scopedDb.select().from(projectsTbl).where(undefined)).toThrow(
       MissingScopedWhereError,
     );
+  });
+
+  it("prevents double .where() from overwriting the injected scope predicate", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const result = scopedDb
+      .select()
+      .from(projectsTbl)
+      .where(eq(projectsTbl.id, "project-1")) as unknown as Record<string, unknown>;
+
+    // The scoped where-builder facade must not expose .where() — that would
+    // allow overwriting the injected scope predicate (Drizzle overwrites, not ANDs).
+    expect(typeof result.where).toBe("undefined");
+
+    // Scope predicate was injected and not overwritten.
+    expect(rawDb._state.selectCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(true);
+  });
+
+  it("preserves scope predicate through .limit(), .offset(), and .orderBy() chaining", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const result = scopedDb
+      .select()
+      .from(projectsTbl)
+      .where(eq(projectsTbl.id, "project-1"))
+      .limit(10)
+      .offset(5)
+      .orderBy(projectsTbl.id) as unknown as Record<string, unknown>;
+
+    // No .where() exposed after chaining terminal methods.
+    expect(typeof result.where).toBe("undefined");
+    expect(rawDb._state.selectCondition).toBeDefined();
+    expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
+  });
+
+  it("prevents double .where() on scoped update results", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const result = scopedDb
+      .update(projectsTbl)
+      .set({ name: "Updated" })
+      .where(eq(projectsTbl.id, "project-1")) as unknown as Record<string, unknown>;
+
+    expect(typeof result.where).toBe("undefined");
+    expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
+  });
+
+  it("allows awaiting scoped update and delete results as promises", async () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const updateResult = await scopedDb
+      .update(projectsTbl)
+      .set({ name: "Updated" })
+      .where(eq(projectsTbl.id, "project-1"));
+    expect(updateResult).toEqual({
+      condition: rawDb._state.updateCondition,
+      values: { name: "Updated" },
+    });
+
+    const deleteResult = await scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "project-1"));
+    expect(deleteResult).toEqual({ condition: rawDb._state.deleteCondition });
+  });
+
+  it("prevents double .where() on scoped delete results", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const result = scopedDb
+      .delete(projectsTbl)
+      .where(eq(projectsTbl.id, "project-1")) as unknown as Record<string, unknown>;
+
+    expect(typeof result.where).toBe("undefined");
+    expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
   });
 
   it("throws on relational queries without where when strict mode is enabled", () => {

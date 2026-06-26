@@ -87,9 +87,8 @@ function createScopedFromBuilder<
   return {
     where(condition: SQL | undefined): ScopedWhereBuilder<TResult> {
       assertWhereAllowed(condition, rootRule, options);
-      return builder.where(
-        scopeCondition(condition, rootRule, options),
-      ) as ScopedWhereBuilder<TResult>;
+      const rawBuilder = builder.where(scopeCondition(condition, rootRule, options));
+      return createScopedWhereBuilder<TResult>(rawBuilder);
     },
 
     leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
@@ -121,4 +120,25 @@ function createScopedFromBuilder<
       return Promise.resolve(query).then(onfulfilled, onrejected);
     },
   };
+}
+
+/** Build a scoped where-builder facade that prevents double-.where() scope overwrite. */
+function createScopedWhereBuilder<TResult>(
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
+  rawBuilder: any,
+): ScopedWhereBuilder<TResult> {
+  const promise = Promise.resolve(rawBuilder) as Promise<TResult>;
+  const facade = {
+    limit(n: number): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.limit(n));
+    },
+    offset(n: number): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.offset(n));
+    },
+    // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+    orderBy(...columns: any[]): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.orderBy(...columns));
+    },
+  };
+  return Object.assign(promise, facade) as ScopedWhereBuilder<TResult>;
 }
