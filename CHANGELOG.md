@@ -9,6 +9,7 @@ All notable user-visible changes to this project are documented in this file.
 - Forward dialect-native terminal methods through scoped mutation results when the underlying builder provides them: `.returning(...)` on scoped insert/update/delete (Postgres/SQLite), and `.$returningId()` on scoped inserts (MySQL). Each method stays hidden for dialects that lack it (for example MySQL exposes no RETURNING clause).
 - Add `.$unsafeUnscoped()` on scoped insert results: a loud, local escape that returns the raw dialect insert builder (already carrying the scoped `.values(...)` payload) so conflict/upsert methods can be chained explicitly, e.g. `db.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate(...)`. The conflict methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are intentionally withheld from the scoped result itself, because an upsert's conflict target, `set`, and `where` clauses fall outside the scope predicate that `.values(...)` injects and must be audited at the call site.
 - Expose `.groupBy(...)` and `.having(...)` on scoped select query builders so aggregate queries can be expressed through the guardrailed facade instead of dropping to the raw handle.
+- Add optional escape-hatch auditing tools: an ESLint plugin at `@modemdev/drizzle-scoped-db/eslint` and a standalone `drizzle-scoped-db lint-escapes` scanner for Oxlint/CI workflows.
 
 ### Changed
 

@@ -12,6 +12,8 @@ import {
   MissingScopedWhereError,
   scopeByColumn,
 } from "./index";
+import scopedDbEslint from "./eslint";
+import { scanSourceForEscapes } from "./lint-escapes";
 
 const projectsTbl = pgTable("projects", {
   id: text("id").primaryKey(),
@@ -1367,5 +1369,46 @@ describe("createScopedDb", () => {
         projectsTbl,
       ),
     ).toThrow("workspace_id");
+  });
+});
+
+describe("escape hatch lint tooling", () => {
+  it("exposes ESLint flat-config presets", () => {
+    expect(scopedDbEslint.rules["no-unsafe-escape"]).toBeDefined();
+    expect(scopedDbEslint.rules["require-unsafe-escape-reason"]).toBeDefined();
+    expect(scopedDbEslint.configs.strict.rules).toEqual({
+      "drizzle-scoped-db/require-unsafe-escape-reason": "error",
+    });
+  });
+
+  it("finds scoped DB escape hatches while ignoring strings and comments", () => {
+    const findings = scanSourceForEscapes(`
+      const text = "db._raw";
+      // db._unsafeUnscopedDb
+      db._raw.select();
+      db.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate({ set: row });
+      extractRawDb(db).select();
+    `);
+
+    expect(findings.map((finding) => finding.name)).toEqual([
+      "_raw",
+      "$unsafeUnscoped",
+      "extractRawDb",
+    ]);
+  });
+
+  it("can allow audited escape hatches with nearby comments", () => {
+    const findings = scanSourceForEscapes(
+      `
+      // drizzle-scoped-db-escape-ok: conflict target includes workspace_id
+      db.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate({ set: row });
+
+      const unrelated = true;
+      db._unsafeUnscopedDb.select();
+    `,
+      { allowWithComment: true },
+    );
+
+    expect(findings.map((finding) => finding.name)).toEqual(["_unsafeUnscopedDb"]);
   });
 });

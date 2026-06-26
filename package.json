@@ -19,6 +19,10 @@
     "type": "git",
     "url": "git+https://github.com/modem-dev/drizzle-scoped-db.git"
   },
+  "bin": {
+    "drizzle-scoped-db": "./dist/cli.js",
+    "drizzle-scoped-db-lint-escapes": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "README.md",
@@ -32,6 +36,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./eslint": {
+      "types": "./dist/eslint.d.ts",
+      "import": "./dist/eslint.js"
+    },
+    "./lint-escapes": {
+      "types": "./dist/lint-escapes.d.ts",
+      "import": "./dist/lint-escapes.js"
     }
   },
   "publishConfig": {
