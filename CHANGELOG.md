@@ -6,7 +6,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Added
 
-- Expose `.returning(...)` on scoped insert/update/delete results when the underlying dialect supports a RETURNING clause (Postgres/SQLite); the method stays hidden for dialects without one (MySQL).
+- Forward dialect-native terminal methods through scoped mutation results when the underlying builder provides them: `.returning(...)` on scoped insert/update/delete (Postgres/SQLite), and `.$returningId()` on scoped inserts (MySQL). Each method stays hidden for dialects that lack it (for example MySQL exposes no RETURNING clause).
+- Add `.$unsafeUnscoped()` on scoped insert results: a loud, local escape that returns the raw dialect insert builder (already carrying the scoped `.values(...)` payload) so conflict/upsert methods can be chained explicitly, e.g. `db.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate(...)`. The conflict methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are intentionally withheld from the scoped result itself, because an upsert's conflict target, `set`, and `where` clauses fall outside the scope predicate that `.values(...)` injects and must be audited at the call site.
 - Expose `.groupBy(...)` and `.having(...)` on scoped select query builders so aggregate queries can be expressed through the guardrailed facade instead of dropping to the raw handle.
 
 ### Changed

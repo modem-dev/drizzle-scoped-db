@@ -331,6 +331,18 @@ workspaceDb._unsafeUnscopedDb;
 
 Use it for migrations, admin jobs, test setup, cross-scope maintenance, or unsupported query shapes. Queries through this property are not scoped.
 
+Scoped inserts expose a narrower, local escape for upserts. Conflict-resolution methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are withheld from the scoped insert result, because an upsert's conflict target, `set`, and `where` clauses fall outside the scope predicate that `.values(...)` injects. Reach them with `.$unsafeUnscoped()`, which returns the raw dialect builder already carrying the scoped values:
+
+```ts
+workspaceDb
+  .insert(records)
+  .values({ workspaceId, regionId, key, value }) // scope-validated here
+  .$unsafeUnscoped()
+  .onConflictDoUpdate({ target: [records.workspaceId, records.key], set: { value } });
+```
+
+The insert payload is still scope-validated, but you own the conflict target, `set`, and any follow-up `.where(...)`: keep the target scope-safe (prefer a unique key that includes the scope columns) and never let `set` move a row across scopes.
+
 The wrapper scopes supported selects, joins, mutations, root relational queries, and validated inserts. The schema shape in [Data model shape](#data-model-shape) still matters: your data model needs ownership columns, indexes, and relationship invariants that match how your app scopes data.
 
 Not protected:

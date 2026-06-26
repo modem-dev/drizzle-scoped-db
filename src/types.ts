@@ -167,18 +167,6 @@ export type ForwardMethod<TRaw, TName extends string> = [TRaw] extends [
   : {};
 
 /**
- * Like {@link ForwardMethod}, but retypes the method's return as a scoped insert result so that a
- * conflict clause (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) stays
- * chainable with a table-precise `.returning(...)`. The argument types are forwarded verbatim from
- * the raw builder, so the per-dialect config object keeps its exact shape.
- */
-export type ForwardChainMethod<TRaw, TTable, TName extends string> = [TRaw] extends [
-  { [K in TName]: (...args: infer TArgs) => unknown },
-]
-  ? { [K in TName]: (...args: TArgs) => ScopedInsertResult<TRaw, TTable> }
-  : {};
-
-/**
  * Dialect-gated, table-precise `returning(...)`. Present only when the underlying builder exposes a
  * RETURNING clause (Postgres/SQLite, not MySQL). No-arg returning yields the table's full row type;
  * the column-projection overload mirrors Drizzle's selection inference. Row types come from `TTable`
@@ -204,19 +192,30 @@ export type ScopedMutationResult<TRaw = unknown, TTable = ScopedTable> = Promise
   ScopedReturning<TRaw, TTable>;
 
 /**
- * Terminal result of a scoped insert. Everything {@link ScopedMutationResult} offers, plus the
- * dialect's upsert/conflict-resolution methods when present: `onConflictDoNothing` /
- * `onConflictDoUpdate` (Postgres/SQLite) and `onDuplicateKeyUpdate` / `$returningId` (MySQL).
- * Scope is already injected by `.values(...)`, so chaining these stays guardrail-safe.
+ * Terminal result of a scoped insert. Everything {@link ScopedMutationResult} offers (awaitable plus
+ * a table-precise `.returning(...)` where the dialect supports it), and `$returningId()` on MySQL.
+ *
+ * Conflict/upsert methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are
+ * intentionally NOT exposed here: an upsert's conflict target, `set`, and `where` clauses fall
+ * outside the scope predicate that `.values(...)` injects, so the guardrail cannot vouch for them.
+ * Reach them through {@link ScopedInsertResult.$unsafeUnscoped}, a loud, local escape that hands back
+ * the raw dialect builder (already carrying the scoped values) so the upsert can be audited at the
+ * call site.
  */
 export type ScopedInsertResult<TRaw = unknown, TTable = ScopedTable> = ScopedMutationResult<
   TRaw,
   TTable
 > &
-  ForwardChainMethod<TRaw, TTable, "onConflictDoNothing"> &
-  ForwardChainMethod<TRaw, TTable, "onConflictDoUpdate"> &
-  ForwardChainMethod<TRaw, TTable, "onDuplicateKeyUpdate"> &
-  ForwardMethod<TRaw, "$returningId">;
+  ForwardMethod<TRaw, "$returningId"> & {
+    /**
+     * Local escape hatch to the raw dialect insert builder, already carrying this insert's scoped
+     * `.values(...)` payload. Use it to chain conflict/upsert methods the scoped facade withholds:
+     * `orgDb.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate(...)`. Scope was injected
+     * into the values, but the conflict target, `set`, and any follow-up `.where(...)` are yours to
+     * keep scope-safe.
+     */
+    $unsafeUnscoped(): TRaw;
+  };
 
 /**
  * Raw builder type a dialect returns from `db.insert(table).values(...)`, instantiated for the

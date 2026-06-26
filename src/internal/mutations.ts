@@ -16,6 +16,24 @@ import {
   scopeCondition,
 } from "./scope.js";
 
+/**
+ * Wrap the raw dialect insert result so the scoped facade can expose `$unsafeUnscoped()` — a local
+ * escape that returns the raw builder (already carrying the scoped values) for conflict/upsert
+ * chaining. Every other property delegates to the raw builder, keeping the result awaitable and
+ * preserving `.returning(...)` / `.$returningId()`.
+ */
+function wrapScopedInsertResult<TResult extends object>(raw: TResult): TResult {
+  return new Proxy(raw, {
+    get(target, property) {
+      if (property === "$unsafeUnscoped") {
+        return () => target;
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 /** Create an insert builder that validates scoped values. */
 export function createScopedInsertBuilder<TScope, TTable extends ScopedTable>(
   db: object,
@@ -38,7 +56,7 @@ export function createScopedInsertBuilder<TScope, TTable extends ScopedTable>(
         }
       }
 
-      return insertBuilder.values(valuesOrArray);
+      return wrapScopedInsertResult(insertBuilder.values(valuesOrArray));
     },
   };
 }

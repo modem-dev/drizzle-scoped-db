@@ -617,20 +617,30 @@ describe("createScopedDb", () => {
     // @ts-expect-error Scoped delete builders only expose where().
     void deleteBuilder.returning;
 
-    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause and
-    // conflict-resolution chaining (Postgres/SQLite), including chaining returning afterward.
+    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause directly.
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
       .returning();
+
+    // Conflict-resolution methods are withheld from the scoped result; reaching for one is an error.
+    const scopedInsertResult = scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" });
+    // @ts-expect-error Scoped insert results hide onConflictDoNothing(); use $unsafeUnscoped() first.
+    void scopedInsertResult.onConflictDoNothing;
+
+    // $unsafeUnscoped() opts into the raw builder (post-values), where conflict chaining is available.
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" })
+      .$unsafeUnscoped()
       .onConflictDoNothing()
       .returning();
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-3", workspaceId: "workspace-1", name: "Icebox" })
+      .$unsafeUnscoped()
       .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Icebox" } });
     scopedDb
       .update(projectsTbl)
@@ -671,15 +681,24 @@ describe("createScopedDb", () => {
 
     // Type-level assertion only; never invoked at runtime.
     const _assertDialectMethods = (db: ScopedDb<MySqlLikeDb, string>) => {
-      // MySQL's own upsert/id helpers ARE forwarded when present.
+      // MySQL's id helper is a scope-safe terminal, so it stays forwarded on the scoped result.
       void db.insert(projectsTbl).values({ id: "p" }).$returningId();
-      void db.insert(projectsTbl).values({ id: "p" }).onDuplicateKeyUpdate({ set: {} });
+      // MySQL's upsert helper is withheld until the local escape, where the raw builder exposes it.
+      void db
+        .insert(projectsTbl)
+        .values({ id: "p" })
+        .$unsafeUnscoped()
+        .onDuplicateKeyUpdate({ set: {} });
 
-      // Postgres/SQLite-only methods are NOT invented for MySQL.
+      // The scoped result itself hides every conflict/upsert method, regardless of dialect.
+      // @ts-expect-error MySQL upsert helper is reachable only via $unsafeUnscoped().
+      void db.insert(projectsTbl).values({ id: "p" }).onDuplicateKeyUpdate;
+
+      // Postgres/SQLite-only methods are NOT invented for MySQL, even through the escape.
       // @ts-expect-error MySQL-style insert builders expose no RETURNING clause.
       void db.insert(projectsTbl).values({ id: "p" }).returning;
-      // @ts-expect-error MySQL-style insert builders have no onConflictDoNothing().
-      void db.insert(projectsTbl).values({ id: "p" }).onConflictDoNothing;
+      // @ts-expect-error MySQL-style raw insert builders have no onConflictDoNothing().
+      void db.insert(projectsTbl).values({ id: "p" }).$unsafeUnscoped().onConflictDoNothing;
       // @ts-expect-error MySQL-style update builders expose no RETURNING clause.
       void db.update(projectsTbl).set({ name: "n" }).where(undefined).returning;
       // @ts-expect-error MySQL-style delete builders expose no RETURNING clause.
@@ -1046,6 +1065,43 @@ describe("createScopedDb", () => {
       { id: "project-2", workspaceId: "workspace-1", name: "One" },
       { id: "project-3", workspaceId: "workspace-1", name: "Two" },
     ]);
+  });
+
+  it("exposes the raw insert builder via $unsafeUnscoped() only after scoped values validation runs", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    // The scoped result delegates non-function properties straight through to the raw builder.
+    const scopedResult = scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" });
+    expect((scopedResult as unknown as { values: unknown }).values).toEqual({
+      id: "project-1",
+      workspaceId: "workspace-1",
+      name: "Roadmap",
+    });
+
+    // The escape returns the raw post-values() builder, where conflict chaining is available.
+    const raw = scopedResult.$unsafeUnscoped();
+    expect(typeof raw.onConflictDoUpdate).toBe("function");
+    expect(raw.onConflictDoNothing()).toBe(raw);
+    expect(rawDb._state.insertValues).toEqual({
+      id: "project-1",
+      workspaceId: "workspace-1",
+      name: "Roadmap",
+    });
+
+    // Scoped insert validation still runs first: an out-of-scope row throws before any escape.
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-2", workspaceId: "workspace-2", name: "Wrong" })
+        .$unsafeUnscoped(),
+    ).toThrow(InvalidScopedInsertError);
   });
 
   it("supports custom error factories for every scoped validation error", () => {
