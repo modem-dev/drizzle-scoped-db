@@ -617,21 +617,22 @@ describe("createScopedDb", () => {
     // @ts-expect-error Scoped delete builders only expose where().
     void deleteBuilder.returning;
 
-    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause and
-    // conflict-resolution chaining (Postgres/SQLite), including chaining returning afterward.
+    // Once scope is injected, the terminal result exposes the dialect's RETURNING clause
+    // (Postgres/SQLite), including chaining returning afterward.
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
       .returning();
-    scopedDb
+    // Conflict-resolution methods are intentionally NOT forwarded onto a scoped insert: an
+    // upsert's set/conflict-target/where clauses fall outside scope injection, so callers must
+    // route them through the raw escape hatch and audit scope safety by hand.
+    const scopedInsert = scopedDb
       .insert(projectsTbl)
-      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" })
-      .onConflictDoNothing()
-      .returning();
-    scopedDb
-      .insert(projectsTbl)
-      .values({ id: "project-3", workspaceId: "workspace-1", name: "Icebox" })
-      .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Icebox" } });
+      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" });
+    // @ts-expect-error Scoped inserts expose no onConflictDoNothing(); use _raw for upserts.
+    void scopedInsert.onConflictDoNothing;
+    // @ts-expect-error Scoped inserts expose no onConflictDoUpdate(); use _raw for upserts.
+    void scopedInsert.onConflictDoUpdate;
     scopedDb
       .update(projectsTbl)
       .set({ name: "Updated" })
@@ -651,8 +652,8 @@ describe("createScopedDb", () => {
   });
 
   it("forwards only the methods a dialect actually exposes (MySQL vs Postgres)", () => {
-    // A MySQL-shaped DB: inserts resolve to row-count metadata with MySQL's own upsert/id
-    // helpers, and have no RETURNING clause or Postgres-style onConflict methods.
+    // A MySQL-shaped DB: inserts resolve to row-count metadata with MySQL's own generated-id
+    // helper, and have no RETURNING clause or Postgres-style onConflict methods.
     type MySqlLikeDb = {
       insert(table: unknown): {
         values(values: unknown): {
@@ -671,10 +672,12 @@ describe("createScopedDb", () => {
 
     // Type-level assertion only; never invoked at runtime.
     const _assertDialectMethods = (db: ScopedDb<MySqlLikeDb, string>) => {
-      // MySQL's own upsert/id helpers ARE forwarded when present.
+      // MySQL's own generated-id helper IS forwarded when present.
       void db.insert(projectsTbl).values({ id: "p" }).$returningId();
-      void db.insert(projectsTbl).values({ id: "p" }).onDuplicateKeyUpdate({ set: {} });
 
+      // Conflict-resolution methods are never forwarded, even when the dialect exposes them.
+      // @ts-expect-error Scoped inserts expose no onDuplicateKeyUpdate(); use _raw for upserts.
+      void db.insert(projectsTbl).values({ id: "p" }).onDuplicateKeyUpdate;
       // Postgres/SQLite-only methods are NOT invented for MySQL.
       // @ts-expect-error MySQL-style insert builders expose no RETURNING clause.
       void db.insert(projectsTbl).values({ id: "p" }).returning;
