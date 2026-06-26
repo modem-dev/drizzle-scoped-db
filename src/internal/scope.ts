@@ -2,6 +2,7 @@ import { and, getTableName as drizzleGetTableName, type SQL } from "drizzle-orm"
 
 import {
   InvalidScopedInsertError,
+  InvalidScopedUpdateError,
   MissingScopedPredicateError,
   MissingScopedWhereError,
 } from "../errors.js";
@@ -101,5 +102,17 @@ export function createInvalidInsertError<TScope>(
   return (
     options.errors?.invalidInsert?.(tableName, row, options.scopeName, options.scopeValue) ??
     new InvalidScopedInsertError(options.scopeName, tableName)
+  );
+}
+
+/** Create the configured invalid-update error. */
+export function createInvalidUpdateError<TScope>(
+  tableName: string,
+  row: Record<string, unknown>,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): Error {
+  return (
+    options.errors?.invalidUpdate?.(tableName, row, options.scopeName, options.scopeValue) ??
+    new InvalidScopedUpdateError(options.scopeName, tableName)
   );
 }

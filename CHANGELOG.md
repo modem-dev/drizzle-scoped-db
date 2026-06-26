@@ -10,6 +10,7 @@ All notable user-visible changes to this project are documented in this file.
 - Add a before/after diagram (`assets/before-after.png`) illustrating a forgotten scope filter, embedded in the README.
 - Add release benchmark snapshots and a release workflow gate for performance and heap-growth regressions.
 - Inject scope predicates for joined tables with declared rules in select query builders.
+- Add InvalidScopedUpdateError and update payload validation via `updateKey` (falling back to `insertKey`) to prevent reassigning rows across scopes during updates.
 
 ### Changed
 

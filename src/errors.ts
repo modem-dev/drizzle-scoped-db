@@ -25,3 +25,11 @@ export class InvalidScopedInsertError extends Error {
     this.name = "InvalidScopedInsertError";
   }
 }
+
+/** Error thrown when a scoped update payload has a mismatched scope value. */
+export class InvalidScopedUpdateError extends Error {
+  constructor(scopeName: string, tableName: string) {
+    super(`Update on table "${tableName}" has a mismatched ${scopeName} scope value.`);
+    this.name = "InvalidScopedUpdateError";
+  }
+}

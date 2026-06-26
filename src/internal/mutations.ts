@@ -5,6 +5,7 @@ import type { DrizzleLikeDb, NormalizedCreateScopedDbOptions } from "./options.j
 import {
   assertWhereAllowed,
   createInvalidInsertError,
+  createInvalidUpdateError,
   getRuleTableName,
   scopeCondition,
 } from "./scope.js";
@@ -48,6 +49,11 @@ export function createScopedUpdateBuilder<TScope, TTable extends ScopedTable>(
 
   return {
     set(values: Record<string, unknown>) {
+      if (rule.validateUpdate) {
+        if (!rule.validateUpdate(values, options.scopeValue)) {
+          throw createInvalidUpdateError(getRuleTableName(rule), values, options);
+        }
+      }
       const setBuilder = updateBuilder.set(values);
 
       return {
