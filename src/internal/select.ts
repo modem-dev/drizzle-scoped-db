@@ -53,7 +53,7 @@ function createScopedFromBuilder<
       return createScopedWhereBuilder<TResult>(rawBuilder);
     },
 
-    leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
+    leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
       const joinRule = options.rulesByTable.get(joinTable);
       return createScopedFromBuilder(
         builder.leftJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
@@ -62,7 +62,7 @@ function createScopedFromBuilder<
       );
     },
 
-    innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
+    innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
       const joinRule = options.rulesByTable.get(joinTable);
       return createScopedFromBuilder(
         builder.innerJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
@@ -72,14 +72,17 @@ function createScopedFromBuilder<
     },
 
     // oxlint-disable-next-line unicorn/no-thenable -- Query builders intentionally act as thenables to catch direct awaits.
-    then<TResult1 = unknown, TResult2 = never>(
-      onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    then<TResult1 = TResult, TResult2 = never>(
+      onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2> {
       assertWhereAllowed(undefined, rootRule, options);
       const cond = scopeCondition(undefined, rootRule, options);
       const query = cond ? builder.where(cond) : builder;
-      return Promise.resolve(query).then(onfulfilled, onrejected);
+      return Promise.resolve(query).then(
+        onfulfilled as ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null | undefined,
+        onrejected,
+      );
     },
   };
 }
@@ -100,6 +103,13 @@ function createScopedWhereBuilder<TResult>(
     // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
     orderBy(...columns: any[]): ScopedWhereBuilder<TResult> {
       return createScopedWhereBuilder<TResult>(rawBuilder.orderBy(...columns));
+    },
+    // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+    groupBy(...columns: any[]): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.groupBy(...columns));
+    },
+    having(condition: SQL | undefined): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.having(condition));
     },
   };
   return Object.assign(promise, facade) as ScopedWhereBuilder<TResult>;

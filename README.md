@@ -323,13 +323,21 @@ const scopedDb = createScopedDb(db, {
 
 `drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
 
-The wrapper intentionally exposes the original unscoped DB as a loud escape hatch:
+The wrapper has two explicit escape hatches:
 
 ```ts
+// Local escape: validate scoped insert first, then use raw Drizzle APIs.
+workspaceDb
+  .insert(projects)
+  .values({ id, workspaceId, name })
+  .$unsafeUnscoped()
+  .onConflictDoUpdate({ target: projects.id, set: { name } });
+
+// Root escape: bypass the scoped wrapper entirely.
 workspaceDb._unsafeUnscopedDb;
 ```
 
-Use it for migrations, admin jobs, test setup, cross-scope maintenance, or unsupported query shapes. Queries through this property are not scoped.
+Prefer `.$unsafeUnscoped()` for upserts/conflict handlers after scoped `.values(...)`. Use `_unsafeUnscopedDb` for migrations, admin jobs, test setup, cross-scope maintenance, raw SQL, or unsupported query shapes. Escaped queries are not scoped.
 
 Scoped inserts expose a narrower, local escape for upserts. Conflict-resolution methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are withheld from the scoped insert result, because an upsert's conflict target, `set`, and `where` clauses fall outside the scope predicate that `.values(...)` injects. Reach them with `.$unsafeUnscoped()`, which returns the raw dialect builder already carrying the scoped values:
 
@@ -348,7 +356,7 @@ The wrapper scopes supported selects, joins, mutations, root relational queries,
 Not protected:
 
 - raw SQL, `_unsafeUnscopedDb`, or helpers that close over the raw DB
-- query builder methods not wrapped by this package
+- query builder methods reached after `.$unsafeUnscoped()` or through `_unsafeUnscopedDb`
 - tables or joined tables without rules
 - nested relational `with` rows unless your relationships, filters, or constraints enforce scope safety
 - invalid cross-scope rows that your database constraints allow
@@ -377,7 +385,7 @@ Currently wrapped:
 - `select().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `selectDistinct().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `selectDistinctOn(...).from(table).where(...)` when supported by the driver, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
-- `insert(table).values(...)`
+- `insert(table).values(...)`, plus `.returning(...)`, `.$returningId()` when supported, and `.$unsafeUnscoped()` for raw continuation
 - `update(table).set(...).where(...)`
 - `delete(table).where(...)`
 - `query.<queryName>.findFirst(...)`
