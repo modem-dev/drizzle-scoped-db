@@ -319,27 +319,15 @@ const scopedDb = createScopedDb(db, {
 });
 ```
 
-## Security model
+## Escape hatches
 
-`drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
+`ScopedDb` intentionally does not mirror the full Drizzle API. It covers the common guarded path — scoped selects, joins, CRUD mutations, relational reads, and transactions — without pretending every advanced Drizzle shape is scope-safe.
 
-The wrapper has two explicit escape hatches:
+When you need to step outside that surface, use an explicit escape hatch so you (and your agent) can see the audit boundary.
 
-```ts
-// Local escape: validate scoped insert first, then use raw Drizzle APIs.
-workspaceDb
-  .insert(projects)
-  .values({ id, workspaceId, name })
-  .$unsafeUnscoped()
-  .onConflictDoUpdate({ target: projects.id, set: { name } });
+### Local escape: `.$unsafeUnscoped()`
 
-// Root escape: bypass the scoped wrapper entirely.
-workspaceDb._unsafeUnscopedDb;
-```
-
-Prefer `.$unsafeUnscoped()` for upserts/conflict handlers after scoped `.values(...)`. Use `_unsafeUnscopedDb` for migrations, admin jobs, test setup, cross-scope maintenance, raw SQL, or unsupported query shapes. Escaped queries are not scoped.
-
-Scoped inserts expose a narrower, local escape for upserts. Conflict-resolution methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are withheld from the scoped insert result, because an upsert's conflict target, `set`, and `where` clauses fall outside the scope predicate that `.values(...)` injects. Reach them with `.$unsafeUnscoped()`, which returns the raw dialect builder already carrying the scoped values:
+Use after scoped insert validation, usually for upserts/conflict handlers:
 
 ```ts
 workspaceDb
@@ -349,7 +337,21 @@ workspaceDb
   .onConflictDoUpdate({ target: [records.workspaceId, records.key], set: { value } });
 ```
 
-The insert payload is still scope-validated, but you own the conflict target, `set`, and any follow-up `.where(...)`: keep the target scope-safe (prefer a unique key that includes the scope columns) and never let `set` move a row across scopes.
+The inserted values were checked, but the conflict target, `set`, and follow-up `where` clauses are yours to keep scope-safe. Prefer unique keys that include the scope columns, and never let `set` move a row across scopes.
+
+### Root escape: `_unsafeUnscopedDb`
+
+Use when there is no scoped chain to start from:
+
+```ts
+workspaceDb._unsafeUnscopedDb;
+```
+
+Common cases: migrations, admin jobs, test setup, cross-scope maintenance, raw SQL, CTEs/subqueries, `$dynamic`, or query shapes the scoped facade does not model.
+
+## Security model
+
+`drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
 
 The wrapper scopes supported selects, joins, mutations, root relational queries, and validated inserts. The schema shape in [Data model shape](#data-model-shape) still matters: your data model needs ownership columns, indexes, and relationship invariants that match how your app scopes data.
 
