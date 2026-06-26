@@ -1049,10 +1049,14 @@ describe("createScopedDb", () => {
     expect(updateResult).toEqual({
       condition: rawDb._state.updateCondition,
       values: { name: "Updated" },
+      returning: expect.any(Function),
     });
 
     const deleteResult = await scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "project-1"));
-    expect(deleteResult).toEqual({ condition: rawDb._state.deleteCondition });
+    expect(deleteResult).toEqual({
+      condition: rawDb._state.deleteCondition,
+      returning: expect.any(Function),
+    });
   });
 
   it("prevents double .where() on scoped delete results", () => {
