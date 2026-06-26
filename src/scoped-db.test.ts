@@ -602,6 +602,24 @@ describe("createScopedDb", () => {
     // @ts-expect-error Scoped selectDistinctOn builders stay narrow too.
     void distinctOnBuilder.prepare;
 
+    const _assertProjectionChaining = async (db: typeof scopedDb) => {
+      const rows = await db
+        .select({ id: projectsTbl.id, name: projectsTbl.name })
+        .from(projectsTbl)
+        .where(eq(projectsTbl.id, "project-typed"))
+        .groupBy(projectsTbl.id)
+        .having(eq(projectsTbl.id, "project-typed"))
+        .orderBy(projectsTbl.name)
+        .limit(10)
+        .offset(0);
+      const id: string = rows[0]!.id;
+      const name: string = rows[0]!.name;
+      // @ts-expect-error Scoped where-builder chaining preserves projection types.
+      const badId: number = rows[0]!.id;
+      void [id, name, badId];
+    };
+    void _assertProjectionChaining;
+
     const insertBuilder = scopedDb.insert(projectsTbl);
     insertBuilder.values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" });
     // @ts-expect-error Scoped insert builders only expose values().

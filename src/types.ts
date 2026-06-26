@@ -112,78 +112,31 @@ export type InferSelection<TSelection> = {
           : unknown;
 };
 
-type RawWhereMethodResult<TMethod> = TMethod extends {
-  (condition: SQL | undefined): infer TResult;
-}
-  ? TResult
-  : TMethod extends { (condition: SQL): infer TResult }
-    ? TResult
-    : TMethod extends (condition: SQL | undefined) => infer TResult
-      ? TResult
-      : TMethod extends (condition: SQL) => infer TResult
-        ? TResult
-        : unknown;
-
-type RawWhereResult<TRaw> = TRaw extends { where: infer TMethod }
-  ? RawWhereMethodResult<TMethod>
-  : unknown;
-
-type RawJoinMethodResult<TMethod, TJoinTable> = TMethod extends {
-  (table: TJoinTable, on: SQL | undefined): infer TResult;
-}
-  ? TResult
-  : TMethod extends { (table: TJoinTable, on: SQL): infer TResult }
-    ? TResult
-    : TMethod extends (table: TJoinTable, on: SQL | undefined) => infer TResult
-      ? TResult
-      : TMethod extends (table: TJoinTable, on: SQL) => infer TResult
-        ? TResult
-        : unknown;
-
-type RawJoinResult<
-  TRaw,
-  TName extends "leftJoin" | "innerJoin",
-  TJoinTable,
-> = TName extends keyof TRaw ? RawJoinMethodResult<TRaw[TName], TJoinTable> : unknown;
-
-type RawMethodReturn<TMethod> = TMethod extends (...args: never[]) => infer TResult
-  ? TResult
-  : unknown;
-
-type RawSelectBuilder<TDb, TName extends "select" | "selectDistinct"> = TName extends keyof TDb
-  ? RawMethodReturn<TDb[TName]>
-  : unknown;
-
-type RawSelectDistinctOnBuilder<TDb> = TDb extends { selectDistinctOn: infer TMethod }
-  ? RawMethodReturn<TMethod>
-  : unknown;
-
-type RawSelectFromMethodResult<TMethod, TTable> = TMethod extends {
-  (table: TTable): infer TResult;
-}
-  ? TResult
-  : TMethod extends (table: TTable) => infer TResult
-    ? TResult
-    : unknown;
-
-type RawSelectFromResult<TRawSelect, TTable> = TRawSelect extends { from: infer TMethod }
-  ? RawSelectFromMethodResult<TMethod, TTable>
-  : unknown;
-
 /** Query builder returned after `.where(...)` is called. */
-export type ScopedWhereBuilder<TResult = unknown, TRaw = unknown> = TRaw & Promise<TResult>;
+export interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
+  limit(n: number): ScopedWhereBuilder<TResult>;
+  offset(n: number): ScopedWhereBuilder<TResult>;
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+  orderBy(...columns: any[]): ScopedWhereBuilder<TResult>;
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+  groupBy(...columns: any[]): ScopedWhereBuilder<TResult>;
+  having(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
+}
 
 /** Query builder returned after selecting from a scoped table. */
-export interface ScopedQueryBuilder<TRawFrom = unknown, TResult = unknown[]> {
-  where(condition: SQL | undefined): ScopedWhereBuilder<TResult, RawWhereResult<TRawFrom>>;
+export interface ScopedQueryBuilder<
+  TTable extends ScopedTable,
+  TResult = NonNullable<TTable["$inferSelect"]>[],
+> {
+  where(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
   leftJoin<TJoinTable extends Table<TableConfig>>(
     table: TJoinTable,
     on: SQL | undefined,
-  ): ScopedQueryBuilder<RawJoinResult<TRawFrom, "leftJoin", TJoinTable>, unknown[]>;
+  ): ScopedQueryBuilder<TTable, TResult>;
   innerJoin<TJoinTable extends Table<TableConfig>>(
     table: TJoinTable,
     on: SQL | undefined,
-  ): ScopedQueryBuilder<RawJoinResult<TRawFrom, "innerJoin", TJoinTable>, unknown[]>;
+  ): ScopedQueryBuilder<TTable, TResult>;
   then<TResult1 = TResult, TResult2 = never>(
     onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
@@ -191,11 +144,11 @@ export interface ScopedQueryBuilder<TRawFrom = unknown, TResult = unknown[]> {
 }
 
 /** Select builder facade that scopes only tables with matching rules. */
-export interface ScopedSelectBuilder<TRawSelect = unknown, TSelection = undefined> {
+export interface ScopedSelectBuilder<TSelection = undefined> {
   from<TTable extends ScopedTable>(
     table: TTable,
   ): ScopedQueryBuilder<
-    RawSelectFromResult<TRawSelect, TTable>,
+    TTable,
     TSelection extends undefined
       ? NonNullable<TTable["$inferSelect"]>[]
       : InferSelection<TSelection>[]
@@ -302,6 +255,14 @@ export interface ScopedInsertBuilder<TRawInsert = unknown, TTable = ScopedTable>
   ): ScopedInsertResult<RawInsertResultFromValues<TRawInsert>, TTable>;
 }
 
+type RawWhereResult<TRaw> = [TRaw] extends [
+  { where: (condition: SQL | undefined) => infer TResult },
+]
+  ? TResult
+  : [TRaw] extends [{ where: (condition: SQL) => infer TResult }]
+    ? TResult
+    : unknown;
+
 type RawUpdateSetResult<TRawUpdate> = [TRawUpdate] extends [
   { set: (...args: never[]) => infer TSet },
 ]
@@ -334,25 +295,20 @@ export type ScopedDb<
   TScopeValuePropertyName extends string | undefined = undefined,
 > = {
   /** Select from a scoped table. */
-  select(): ScopedSelectBuilder<RawSelectBuilder<TDb, "select">, undefined>;
-  select<TSelection extends Record<string, unknown>>(
-    columns: TSelection,
-  ): ScopedSelectBuilder<RawSelectBuilder<TDb, "select">, TSelection>;
+  select<TSelection extends Record<string, unknown> | undefined = undefined>(
+    columns?: TSelection,
+  ): ScopedSelectBuilder<TSelection>;
   /** Select distinct from a scoped table. */
-  selectDistinct(): ScopedSelectBuilder<RawSelectBuilder<TDb, "selectDistinct">, undefined>;
-  selectDistinct<TSelection extends Record<string, unknown>>(
-    columns: TSelection,
-  ): ScopedSelectBuilder<RawSelectBuilder<TDb, "selectDistinct">, TSelection>;
+  selectDistinct<TSelection extends Record<string, unknown> | undefined = undefined>(
+    columns?: TSelection,
+  ): ScopedSelectBuilder<TSelection>;
   /** Select distinct on columns from a scoped table, when the underlying DB exposes it. */
   selectDistinctOn: TDb extends { selectDistinctOn: infer TSelectDistinctOn }
     ? TSelectDistinctOn extends (...args: never[]) => unknown
-      ? {
-          (onColumns: unknown[]): ScopedSelectBuilder<RawSelectDistinctOnBuilder<TDb>, undefined>;
-          <TSelection extends Record<string, unknown>>(
-            onColumns: unknown[],
-            columns: TSelection,
-          ): ScopedSelectBuilder<RawSelectDistinctOnBuilder<TDb>, TSelection>;
-        }
+      ? <TSelection extends Record<string, unknown> | undefined = undefined>(
+          onColumns: unknown[],
+          columns?: TSelection,
+        ) => ScopedSelectBuilder<TSelection>
       : undefined
     : undefined;
   /** Insert into a scoped table. */
