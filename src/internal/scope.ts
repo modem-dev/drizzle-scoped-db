@@ -35,10 +35,10 @@ export function isStrictMode<TScope>(options: NormalizedCreateScopedDbOptions<TS
 
 /** Add a joined table's scope predicate to the join condition while preserving outer-join semantics. */
 export function scopeJoinCondition<TScope>(
-  condition: SQL,
+  condition: SQL | undefined,
   rule: ScopedTableRule<TScope> | undefined,
   options: NormalizedCreateScopedDbOptions<TScope>,
-): SQL {
+): SQL | undefined {
   const scopedPredicate = rule?.where(options.scopeValue);
   if (!scopedPredicate) {
     return condition;

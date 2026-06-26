@@ -1,53 +1,15 @@
-import type { Column, SQL, Table, TableConfig } from "drizzle-orm";
+import type { SQL, Table, TableConfig } from "drizzle-orm";
 
-import type { ScopedTable, ScopedTableRule } from "../types.js";
+import type {
+  InferSelection,
+  ScopedQueryBuilder,
+  ScopedSelectBuilder,
+  ScopedTable,
+  ScopedTableRule,
+  ScopedWhereBuilder,
+} from "../types.js";
 import type { NormalizedCreateScopedDbOptions } from "./options.js";
 import { assertWhereAllowed, scopeCondition, scopeJoinCondition } from "./scope.js";
-
-/** Type helper to infer selected values from a Drizzle selection object. */
-type InferSelection<T> = {
-  [K in keyof T]: T[K] extends Column<infer Config> ? Config["data"] : never;
-};
-
-/** Query builder returned after selecting from a scoped table. */
-interface ScopedQueryBuilder<
-  TTable extends ScopedTable,
-  TResult = NonNullable<TTable["$inferSelect"]>[],
-> {
-  where(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
-  leftJoin<TJoinTable extends Table<TableConfig>>(
-    table: TJoinTable,
-    on: SQL,
-  ): ScopedQueryBuilder<TTable, TResult>;
-  innerJoin<TJoinTable extends Table<TableConfig>>(
-    table: TJoinTable,
-    on: SQL,
-  ): ScopedQueryBuilder<TTable, TResult>;
-  then<TResult1 = unknown, TResult2 = never>(
-    onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
-    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
-  ): Promise<TResult1 | TResult2>;
-}
-
-/** Query builder returned after `.where(...)` is called. */
-interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
-  limit(n: number): ScopedWhereBuilder<TResult>;
-  offset(n: number): ScopedWhereBuilder<TResult>;
-  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
-  orderBy(...columns: any[]): ScopedWhereBuilder<TResult>;
-}
-
-/** Select builder facade that scopes only tables with matching rules. */
-interface ScopedSelectBuilder<TSelection = undefined> {
-  from<TTable extends ScopedTable>(
-    table: TTable,
-  ): ScopedQueryBuilder<
-    TTable,
-    TSelection extends undefined
-      ? NonNullable<TTable["$inferSelect"]>[]
-      : InferSelection<TSelection>[]
-  >;
-}
 
 /** Build a scoped select/selectDistinct/selectDistinctOn facade. */
 export function createScopedSelectBuilder<TScope, TSelection>(
@@ -91,7 +53,7 @@ function createScopedFromBuilder<
       return createScopedWhereBuilder<TResult>(rawBuilder);
     },
 
-    leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
+    leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
       const joinRule = options.rulesByTable.get(joinTable);
       return createScopedFromBuilder(
         builder.leftJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
@@ -100,7 +62,7 @@ function createScopedFromBuilder<
       );
     },
 
-    innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL) {
+    innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
       const joinRule = options.rulesByTable.get(joinTable);
       return createScopedFromBuilder(
         builder.innerJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
@@ -110,14 +72,17 @@ function createScopedFromBuilder<
     },
 
     // oxlint-disable-next-line unicorn/no-thenable -- Query builders intentionally act as thenables to catch direct awaits.
-    then<TResult1 = unknown, TResult2 = never>(
-      onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    then<TResult1 = TResult, TResult2 = never>(
+      onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
       onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
     ): Promise<TResult1 | TResult2> {
       assertWhereAllowed(undefined, rootRule, options);
       const cond = scopeCondition(undefined, rootRule, options);
       const query = cond ? builder.where(cond) : builder;
-      return Promise.resolve(query).then(onfulfilled, onrejected);
+      return Promise.resolve(query).then(
+        onfulfilled as ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null | undefined,
+        onrejected,
+      );
     },
   };
 }
@@ -138,6 +103,13 @@ function createScopedWhereBuilder<TResult>(
     // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
     orderBy(...columns: any[]): ScopedWhereBuilder<TResult> {
       return createScopedWhereBuilder<TResult>(rawBuilder.orderBy(...columns));
+    },
+    // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+    groupBy(...columns: any[]): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.groupBy(...columns));
+    },
+    having(condition: SQL | undefined): ScopedWhereBuilder<TResult> {
+      return createScopedWhereBuilder<TResult>(rawBuilder.having(condition));
     },
   };
   return Object.assign(promise, facade) as ScopedWhereBuilder<TResult>;

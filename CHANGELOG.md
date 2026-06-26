@@ -2,6 +2,21 @@
 
 All notable user-visible changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Forward dialect-native terminal methods through scoped mutation results when the underlying builder provides them: `.returning(...)` on scoped insert/update/delete (Postgres/SQLite), and `.$returningId()` on scoped inserts (MySQL). Each method stays hidden for dialects that lack it (for example MySQL exposes no RETURNING clause).
+- Add `.$unsafeUnscoped()` on scoped insert results: a loud, local escape that returns the raw dialect insert builder (already carrying the scoped `.values(...)` payload) so conflict/upsert methods can be chained explicitly, e.g. `db.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate(...)`. The conflict methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are intentionally withheld from the scoped result itself, because an upsert's conflict target, `set`, and `where` clauses fall outside the scope predicate that `.values(...)` injects and must be audited at the call site.
+- Expose `.groupBy(...)` and `.having(...)` on scoped select query builders so aggregate queries can be expressed through the guardrailed facade instead of dropping to the raw handle.
+
+### Changed
+
+- `createScopedDb` now returns an explicit scoped wrapper type instead of the raw database type, so TypeScript no longer exposes raw Drizzle builder methods that the protected scoped facade does not provide.
+- Scoped `.returning(...)` now infers row types from the target table (and projection columns) instead of degrading to `unknown`, so destructured/awaited insert/update/delete results stay precisely typed.
+- `InferSelection` now preserves `sql<T>` fragments, aliased `sql<T>().as()` fragments, and nested selection objects (previously collapsed to `never`), and falls back to `unknown` rather than `never` for unrecognized leaves, keeping custom projections usable downstream.
+- Scoped `.leftJoin(...)` / `.innerJoin(...)` now accept `SQL | undefined` for the join condition, matching Drizzle's own signature and the result of composing predicates with `and(...)` / `or(...)`.
+
 ## [0.7.0] - 2026-06-26
 
 ### Added

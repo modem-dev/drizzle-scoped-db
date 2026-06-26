@@ -319,24 +319,46 @@ const scopedDb = createScopedDb(db, {
 });
 ```
 
-## Security model
+## Escape hatches
 
-`drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
+`ScopedDb` intentionally does not mirror the full Drizzle API. It covers the common guarded path — scoped selects, joins, CRUD mutations, relational reads, and transactions — without pretending every advanced Drizzle shape is scope-safe.
 
-The wrapper intentionally exposes the original unscoped DB as a loud escape hatch:
+When you need to step outside that surface, use an explicit escape hatch so you (and your agent) can see the audit boundary.
+
+### Local escape: `.$unsafeUnscoped()`
+
+Use after scoped insert validation, usually for upserts/conflict handlers:
+
+```ts
+workspaceDb
+  .insert(records)
+  .values({ workspaceId, regionId, key, value }) // scope-validated here
+  .$unsafeUnscoped()
+  .onConflictDoUpdate({ target: [records.workspaceId, records.key], set: { value } });
+```
+
+The inserted values were checked, but the conflict target, `set`, and follow-up `where` clauses are yours to keep scope-safe. Prefer unique keys that include the scope columns, and never let `set` move a row across scopes.
+
+### Root escape: `_unsafeUnscopedDb`
+
+Use when there is no scoped chain to start from:
 
 ```ts
 workspaceDb._unsafeUnscopedDb;
 ```
 
-Use it for migrations, admin jobs, test setup, cross-scope maintenance, or unsupported query shapes. Queries through this property are not scoped.
+Common cases: migrations, admin jobs, test setup, cross-scope maintenance, raw SQL, CTEs/subqueries, `$dynamic`, or query shapes the scoped facade does not model.
+
+## Security model
+
+`drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
 
 The wrapper scopes supported selects, joins, mutations, root relational queries, and validated inserts. The schema shape in [Data model shape](#data-model-shape) still matters: your data model needs ownership columns, indexes, and relationship invariants that match how your app scopes data.
 
 Not protected:
 
 - raw SQL, `_unsafeUnscopedDb`, or helpers that close over the raw DB
-- query builder methods not wrapped by this package
+- query builder methods reached after `.$unsafeUnscoped()` or through `_unsafeUnscopedDb`
 - tables or joined tables without rules
 - nested relational `with` rows unless your relationships, filters, or constraints enforce scope safety
 - invalid cross-scope rows that your database constraints allow
@@ -365,7 +387,7 @@ Currently wrapped:
 - `select().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `selectDistinct().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `selectDistinctOn(...).from(table).where(...)` when supported by the driver, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
-- `insert(table).values(...)`
+- `insert(table).values(...)`, plus `.returning(...)`, `.$returningId()` when supported, and `.$unsafeUnscoped()` for raw continuation
 - `update(table).set(...).where(...)`
 - `delete(table).where(...)`
 - `query.<queryName>.findFirst(...)`
