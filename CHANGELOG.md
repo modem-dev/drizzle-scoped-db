@@ -7,10 +7,14 @@ All notable user-visible changes to this project are documented in this file.
 ### Added
 
 - Expose `.returning(...)` on scoped insert/update/delete results when the underlying dialect supports a RETURNING clause (Postgres/SQLite); the method stays hidden for dialects without one (MySQL).
+- Expose `.groupBy(...)` and `.having(...)` on scoped select query builders so aggregate queries can be expressed through the guardrailed facade instead of dropping to the raw handle.
 
 ### Changed
 
 - `createScopedDb` now returns an explicit scoped wrapper type instead of the raw database type, so TypeScript no longer exposes raw Drizzle builder methods that the protected scoped facade does not provide.
+- Scoped `.returning(...)` now infers row types from the target table (and projection columns) instead of degrading to `unknown`, so destructured/awaited insert/update/delete results stay precisely typed.
+- `InferSelection` now preserves `sql<T>` fragments, aliased `sql<T>().as()` fragments, and nested selection objects (previously collapsed to `never`), and falls back to `unknown` rather than `never` for unrecognized leaves, keeping custom projections usable downstream.
+- Scoped `.leftJoin(...)` / `.innerJoin(...)` now accept `SQL | undefined` for the join condition, matching Drizzle's own signature and the result of composing predicates with `and(...)` / `or(...)`.
 
 ## [0.7.0] - 2026-06-26
 

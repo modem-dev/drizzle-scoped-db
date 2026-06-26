@@ -93,9 +93,22 @@ export type CreateScopedDbOptions<
   errors?: ScopedDbErrors<TScope>;
 };
 
-/** Type helper to infer selected values from a Drizzle selection object. */
+/**
+ * Type helper to infer selected values from a Drizzle selection object. Mirrors the shapes Drizzle
+ * itself allows in a projection: plain columns, raw `sql<T>` fragments, aliased `sql<T>().as()`
+ * fragments, and nested selection objects. Unknown leaf shapes fall back to `unknown` (not `never`)
+ * so downstream spreads, `.map(...)`, and assignments stay usable.
+ */
 export type InferSelection<TSelection> = {
-  [K in keyof TSelection]: TSelection[K] extends Column<infer Config> ? Config["data"] : never;
+  [K in keyof TSelection]: TSelection[K] extends Column<infer Config>
+    ? Config["data"]
+    : TSelection[K] extends SQL<infer T>
+      ? T
+      : TSelection[K] extends SQL.Aliased<infer T>
+        ? T
+        : TSelection[K] extends Record<string, unknown>
+          ? InferSelection<TSelection[K]>
+          : unknown;
 };
 
 /** Query builder returned after `.where(...)` is called. */
@@ -104,6 +117,9 @@ export interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
   offset(n: number): ScopedWhereBuilder<TResult>;
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
   orderBy(...columns: any[]): ScopedWhereBuilder<TResult>;
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+  groupBy(...columns: any[]): ScopedWhereBuilder<TResult>;
+  having(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
 }
 
 /** Query builder returned after selecting from a scoped table. */
@@ -114,11 +130,11 @@ export interface ScopedQueryBuilder<
   where(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
   leftJoin<TJoinTable extends Table<TableConfig>>(
     table: TJoinTable,
-    on: SQL,
+    on: SQL | undefined,
   ): ScopedQueryBuilder<TTable, TResult>;
   innerJoin<TJoinTable extends Table<TableConfig>>(
     table: TJoinTable,
-    on: SQL,
+    on: SQL | undefined,
   ): ScopedQueryBuilder<TTable, TResult>;
   then<TResult1 = unknown, TResult2 = never>(
     onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
@@ -151,13 +167,41 @@ export type ForwardMethod<TRaw, TName extends string> = [TRaw] extends [
   : {};
 
 /**
- * Terminal result of a scoped update/delete. Always awaitable, and—only when the underlying
- * dialect's builder exposes a RETURNING clause (Postgres/SQLite, not MySQL)—chainable with
- * `.returning(...)`. The signature is forwarded verbatim, so column projections and row types
- * stay accurate per dialect.
+ * Like {@link ForwardMethod}, but retypes the method's return as a scoped insert result so that a
+ * conflict clause (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) stays
+ * chainable with a table-precise `.returning(...)`. The argument types are forwarded verbatim from
+ * the raw builder, so the per-dialect config object keeps its exact shape.
  */
-export type ScopedMutationResult<TRaw = unknown> = PromiseLike<Awaited<TRaw>> &
-  ForwardMethod<TRaw, "returning">;
+export type ForwardChainMethod<TRaw, TTable, TName extends string> = [TRaw] extends [
+  { [K in TName]: (...args: infer TArgs) => unknown },
+]
+  ? { [K in TName]: (...args: TArgs) => ScopedInsertResult<TRaw, TTable> }
+  : {};
+
+/**
+ * Dialect-gated, table-precise `returning(...)`. Present only when the underlying builder exposes a
+ * RETURNING clause (Postgres/SQLite, not MySQL). No-arg returning yields the table's full row type;
+ * the column-projection overload mirrors Drizzle's selection inference. Row types come from `TTable`
+ * rather than the raw builder, so they stay precise instead of degrading to `unknown`.
+ */
+export type ScopedReturning<TRaw, TTable> = [TRaw] extends [{ returning: unknown }]
+  ? {
+      returning(): Promise<
+        NonNullable<TTable extends ScopedTable ? TTable["$inferSelect"] : never>[]
+      >;
+      returning<TSelection extends Record<string, unknown>>(
+        columns: TSelection,
+      ): Promise<InferSelection<TSelection>[]>;
+    }
+  : {};
+
+/**
+ * Terminal result of a scoped update/delete. Always awaitable, and—only when the underlying
+ * dialect's builder exposes a RETURNING clause (Postgres/SQLite, not MySQL)—chainable with a
+ * table-precise `.returning(...)`.
+ */
+export type ScopedMutationResult<TRaw = unknown, TTable = ScopedTable> = Promise<Awaited<TRaw>> &
+  ScopedReturning<TRaw, TTable>;
 
 /**
  * Terminal result of a scoped insert. Everything {@link ScopedMutationResult} offers, plus the
@@ -165,21 +209,32 @@ export type ScopedMutationResult<TRaw = unknown> = PromiseLike<Awaited<TRaw>> &
  * `onConflictDoUpdate` (Postgres/SQLite) and `onDuplicateKeyUpdate` / `$returningId` (MySQL).
  * Scope is already injected by `.values(...)`, so chaining these stays guardrail-safe.
  */
-export type ScopedInsertResult<TRaw = unknown> = ScopedMutationResult<TRaw> &
-  ForwardMethod<TRaw, "onConflictDoNothing"> &
-  ForwardMethod<TRaw, "onConflictDoUpdate"> &
-  ForwardMethod<TRaw, "onDuplicateKeyUpdate"> &
+export type ScopedInsertResult<TRaw = unknown, TTable = ScopedTable> = ScopedMutationResult<
+  TRaw,
+  TTable
+> &
+  ForwardChainMethod<TRaw, TTable, "onConflictDoNothing"> &
+  ForwardChainMethod<TRaw, TTable, "onConflictDoUpdate"> &
+  ForwardChainMethod<TRaw, TTable, "onDuplicateKeyUpdate"> &
   ForwardMethod<TRaw, "$returningId">;
 
-/** Raw builder type a dialect returns from `db.insert(table).values(...)`. */
-export type RawInsertResult<TDb> = TDb extends { insert: (...args: never[]) => infer TInsert }
+/**
+ * Raw builder type a dialect returns from `db.insert(table).values(...)`, instantiated for the
+ * specific `TTable`. Threading the table preserves Drizzle's per-table row typing, so forwarded
+ * methods like `.returning()` recover real column types instead of degrading to `unknown`.
+ */
+export type RawInsertResult<TDb, TTable = ScopedTable> = TDb extends {
+  insert: (table: TTable) => infer TInsert;
+}
   ? TInsert extends { values: (...args: never[]) => infer TResult }
     ? TResult
     : unknown
   : unknown;
 
-/** Raw builder type a dialect returns from `db.update(table).set(...).where(...)`. */
-export type RawUpdateResult<TDb> = TDb extends { update: (...args: never[]) => infer TUpdate }
+/** Raw builder type a dialect returns from `db.update(table).set(...).where(...)`, for `TTable`. */
+export type RawUpdateResult<TDb, TTable = ScopedTable> = TDb extends {
+  update: (table: TTable) => infer TUpdate;
+}
   ? TUpdate extends { set: (...args: never[]) => infer TSet }
     ? TSet extends { where: (...args: never[]) => infer TResult }
       ? TResult
@@ -187,31 +242,35 @@ export type RawUpdateResult<TDb> = TDb extends { update: (...args: never[]) => i
     : unknown
   : unknown;
 
-/** Raw builder type a dialect returns from `db.delete(table).where(...)`. */
-export type RawDeleteResult<TDb> = TDb extends { delete: (...args: never[]) => infer TDelete }
+/** Raw builder type a dialect returns from `db.delete(table).where(...)`, for `TTable`. */
+export type RawDeleteResult<TDb, TTable = ScopedTable> = TDb extends {
+  delete: (table: TTable) => infer TDelete;
+}
   ? TDelete extends { where: (...args: never[]) => infer TResult }
     ? TResult
     : unknown
   : unknown;
 
 /** Minimal insert builder facade exposed by scoped DB wrappers. */
-export interface ScopedInsertBuilder<TRaw = unknown> {
-  values(values: Record<string, unknown> | Record<string, unknown>[]): ScopedInsertResult<TRaw>;
+export interface ScopedInsertBuilder<TRaw = unknown, TTable = ScopedTable> {
+  values(
+    values: Record<string, unknown> | Record<string, unknown>[],
+  ): ScopedInsertResult<TRaw, TTable>;
 }
 
 /** Minimal update builder facade exposed by scoped DB wrappers. */
-export interface ScopedUpdateBuilder<TRaw = unknown> {
-  set(values: Record<string, unknown>): ScopedUpdateWhereBuilder<TRaw>;
+export interface ScopedUpdateBuilder<TRaw = unknown, TTable = ScopedTable> {
+  set(values: Record<string, unknown>): ScopedUpdateWhereBuilder<TRaw, TTable>;
 }
 
 /** Builder facade returned after `.set(...)` is called. */
-export interface ScopedUpdateWhereBuilder<TRaw = unknown> {
-  where(condition: SQL | undefined): ScopedMutationResult<TRaw>;
+export interface ScopedUpdateWhereBuilder<TRaw = unknown, TTable = ScopedTable> {
+  where(condition: SQL | undefined): ScopedMutationResult<TRaw, TTable>;
 }
 
 /** Minimal delete builder facade exposed by scoped DB wrappers. */
-export interface ScopedDeleteBuilder<TRaw = unknown> {
-  where(condition: SQL | undefined): ScopedMutationResult<TRaw>;
+export interface ScopedDeleteBuilder<TRaw = unknown, TTable = ScopedTable> {
+  where(condition: SQL | undefined): ScopedMutationResult<TRaw, TTable>;
 }
 
 /** Surface exposed by scoped Drizzle database wrappers. */
@@ -240,11 +299,17 @@ export type ScopedDb<
       : undefined
     : undefined;
   /** Insert into a scoped table. */
-  insert<TTable extends ScopedTable>(table: TTable): ScopedInsertBuilder<RawInsertResult<TDb>>;
+  insert<TTable extends ScopedTable>(
+    table: TTable,
+  ): ScopedInsertBuilder<RawInsertResult<TDb, TTable>, TTable>;
   /** Update a scoped table. */
-  update<TTable extends ScopedTable>(table: TTable): ScopedUpdateBuilder<RawUpdateResult<TDb>>;
+  update<TTable extends ScopedTable>(
+    table: TTable,
+  ): ScopedUpdateBuilder<RawUpdateResult<TDb, TTable>, TTable>;
   /** Delete from a scoped table. */
-  delete<TTable extends ScopedTable>(table: TTable): ScopedDeleteBuilder<RawDeleteResult<TDb>>;
+  delete<TTable extends ScopedTable>(
+    table: TTable,
+  ): ScopedDeleteBuilder<RawDeleteResult<TDb, TTable>, TTable>;
   /** Start a scoped transaction. */
   transaction<T>(
     callback: (

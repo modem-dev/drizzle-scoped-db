@@ -9,6 +9,7 @@ export { defineScopedTable, scopeByColumn } from "./rules.js";
 export { createScopedDb } from "./scoped-db.js";
 export type {
   CreateScopedDbOptions,
+  InferSelection,
   RelationalWhere,
   RelationalWhereCallback,
   ScopedDb,
