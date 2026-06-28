@@ -4,6 +4,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-27
+
 ### Added
 
 - Forward dialect-native terminal methods through scoped mutation results when the underlying builder provides them: `.returning(...)` on scoped insert/update/delete (Postgres/SQLite), and `.$returningId()` on scoped inserts (MySQL). Each method stays hidden for dialects that lack it (for example MySQL exposes no RETURNING clause).
