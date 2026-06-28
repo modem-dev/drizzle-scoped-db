@@ -209,8 +209,37 @@ export type ScopedInsertResult<TRaw = unknown, TTable = ScopedTable> = ScopedMut
      * payload. Use it to chain conflict/upsert methods and audit their target/set/where clauses at
      * the call site.
      */
-    $unsafeUnscoped(): TRaw;
+    $unsafeUnscoped(): UnscopedInsertBuilder<TRaw, TTable>;
   };
+
+/**
+ * Forwards a raw conflict/upsert method (`onConflictDoNothing` / `onConflictDoUpdate` /
+ * `onDuplicateKeyUpdate`) with its exact per-dialect argument types, but retypes the return as a
+ * {@link ScopedInsertResult} so a trailing `.returning(...)` stays table-precise instead of degrading
+ * to the raw builder's widened row type. Sibling of {@link ForwardMethod}, which forwards a method
+ * unchanged; this variant rewrites the return type. Contributes nothing for dialects lacking the method.
+ */
+export type ForwardChainMethod<TRaw, TTable, TName extends string> = [TRaw] extends [
+  { [K in TName]: (...args: infer TArgs) => unknown },
+]
+  ? { [K in TName]: (...args: TArgs) => ScopedInsertResult<TRaw, TTable> }
+  : {};
+
+/**
+ * Surface returned by `.$unsafeUnscoped()`: the raw dialect insert builder, passed through unchanged
+ * except that the conflict/upsert methods and `.returning(...)` are retyped table-precise. The raw
+ * builder's own `.returning(...)` widens its row type to `Record<string, unknown>` once threaded
+ * through the scoped wrapper, so column-accurate types are restored here from `TTable` (the same way
+ * the scoped result itself stays precise).
+ */
+export type UnscopedInsertBuilder<TRaw, TTable> = Omit<
+  TRaw,
+  "returning" | "onConflictDoNothing" | "onConflictDoUpdate" | "onDuplicateKeyUpdate"
+> &
+  ScopedReturning<TRaw, TTable> &
+  ForwardChainMethod<TRaw, TTable, "onConflictDoNothing"> &
+  ForwardChainMethod<TRaw, TTable, "onConflictDoUpdate"> &
+  ForwardChainMethod<TRaw, TTable, "onDuplicateKeyUpdate">;
 
 /** Raw builder type a dialect returns from `db.insert(table)`, instantiated for `TTable`. */
 export type RawInsertBuilder<TDb, TTable = ScopedTable> = TDb extends {
@@ -234,7 +263,7 @@ export type RawDeleteBuilder<TDb, TTable = ScopedTable> = TDb extends {
   : unknown;
 
 type TableInsertValue<TTable> = TTable extends { $inferInsert: infer TInsert }
-  ? TInsert
+  ? { [K in keyof TInsert]: TInsert[K] | SQL }
   : Record<string, unknown>;
 
 type TableUpdateValue<TTable> = Partial<TableInsertValue<TTable>>;
