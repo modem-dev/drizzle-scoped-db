@@ -17,6 +17,11 @@ All notable user-visible changes to this project are documented in this file.
 - `InferSelection` now preserves `sql<T>` fragments, aliased `sql<T>().as()` fragments, and nested selection objects (previously collapsed to `never`), and falls back to `unknown` rather than `never` for unrecognized leaves, keeping custom projections usable downstream.
 - Scoped `.leftJoin(...)` / `.innerJoin(...)` now accept `SQL | undefined` for the join condition, matching Drizzle's own signature and the result of composing predicates with `and(...)` / `or(...)`.
 
+### Fixed
+
+- Scoped `.values(...)` / `.set(...)` payloads now accept Drizzle `sql` template expressions for individual column values, matching Drizzle's own insert/update signatures (previously a raw `SQL` column value was rejected by the scoped payload type).
+- `.$unsafeUnscoped()` now returns a builder whose conflict/upsert chains preserve the table-precise `.returning(...)` row type instead of widening to `Record<string, unknown>`, so `db.insert(tbl).values(row).$unsafeUnscoped().onConflictDoUpdate(...).returning()` stays column-accurate.
+
 ## [0.7.0] - 2026-06-26
 
 ### Added
