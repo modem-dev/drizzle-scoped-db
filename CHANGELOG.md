@@ -4,6 +4,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-29
+
 ### Added
 
 - Expose scoped PostgreSQL/SQLite `.onConflictDoUpdate(...)` and `.onConflictDoNothing(...)` after `.values(...)`; conflict updates are forwarded only after runtime validation proves the conflict target includes the scope and the `set` payload cannot move the row across scopes.
