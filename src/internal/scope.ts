@@ -1,6 +1,7 @@
 import { and, getTableName as drizzleGetTableName, type SQL } from "drizzle-orm";
 
 import {
+  InvalidScopedConflictTargetError,
   InvalidScopedInsertError,
   InvalidScopedUpdateError,
   MissingScopedPredicateError,
@@ -114,5 +115,16 @@ export function createInvalidUpdateError<TScope>(
   return (
     options.errors?.invalidUpdate?.(tableName, row, options.scopeName, options.scopeValue) ??
     new InvalidScopedUpdateError(options.scopeName, tableName)
+  );
+}
+
+/** Create the configured invalid-conflict-target error. */
+export function createInvalidConflictTargetError<TScope>(
+  tableName: string,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): Error {
+  return (
+    options.errors?.invalidConflictTarget?.(tableName, options.scopeName, options.scopeValue) ??
+    new InvalidScopedConflictTargetError(options.scopeName, tableName)
   );
 }

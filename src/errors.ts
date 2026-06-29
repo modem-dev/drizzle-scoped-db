@@ -33,3 +33,13 @@ export class InvalidScopedUpdateError extends Error {
     this.name = "InvalidScopedUpdateError";
   }
 }
+
+/** Error thrown when a scoped upsert conflict target cannot prove it includes the scope. */
+export class InvalidScopedConflictTargetError extends Error {
+  constructor(scopeName: string, tableName: string) {
+    super(
+      `Upsert on table "${tableName}" must use a conflict target that includes the ${scopeName} scope.`,
+    );
+    this.name = "InvalidScopedConflictTargetError";
+  }
+}

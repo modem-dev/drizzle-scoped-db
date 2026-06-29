@@ -321,20 +321,33 @@ const scopedDb = createScopedDb(db, {
 
 ## Escape hatches
 
-`ScopedDb` intentionally does not mirror the full Drizzle API. It covers the common guarded path — scoped selects, joins, CRUD mutations, relational reads, and transactions — without pretending every advanced Drizzle shape is scope-safe.
+`ScopedDb` intentionally does not mirror the full Drizzle API. It covers the common guarded path — scoped selects, joins, CRUD mutations, relational reads, transactions, and scoped PostgreSQL/SQLite upserts — without pretending every advanced Drizzle shape is scope-safe.
+
+### Scoped upserts
+
+PostgreSQL/SQLite conflict updates can stay on the scoped facade when the conflict target includes the scope column and the update payload cannot move the row across scopes:
+
+```ts
+workspaceDb
+  .insert(records)
+  .values({ workspaceId, regionId, key, value }) // scope-validated here
+  .onConflictDoUpdate({ target: [records.workspaceId, records.key], set: { value } });
+```
+
+For `scopeByColumn`, this works when `insertKey` is configured; that validates `.values(...)` and also validates `set` payloads unless you override the update field with `updateKey`. Custom `defineScopedTable` rules can opt in with `validateInsert`, `validateUpdate`, and `hasScopeInConflictTarget`.
 
 When you need to step outside that surface, use an explicit escape hatch so you (and your agent) can see the audit boundary.
 
 ### Local escape: `.$unsafeUnscoped()`
 
-Use after scoped insert validation, usually for upserts/conflict handlers:
+Use after scoped insert validation for conflict handlers the scoped facade cannot prove safe, such as targetless MySQL `onDuplicateKeyUpdate(...)`, conflict targets that do not include scope, or custom rules without upsert validators:
 
 ```ts
 workspaceDb
   .insert(records)
   .values({ workspaceId, regionId, key, value }) // scope-validated here
   .$unsafeUnscoped()
-  .onConflictDoUpdate({ target: [records.workspaceId, records.key], set: { value } });
+  .onConflictDoUpdate({ target: [records.key], set: { value } });
 ```
 
 The inserted values were checked, but the conflict target, `set`, and follow-up `where` clauses are yours to keep scope-safe. Prefer unique keys that include the scope columns, and never let `set` move a row across scopes.
@@ -387,7 +400,7 @@ Currently wrapped:
 - `select().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `selectDistinct().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
 - `selectDistinctOn(...).from(table).where(...)` when supported by the driver, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
-- `insert(table).values(...)`, plus `.returning(...)`, `.$returningId()` when supported, and `.$unsafeUnscoped()` for raw continuation
+- `insert(table).values(...)`, plus `.returning(...)`, `.$returningId()`, `.onConflictDoNothing(...)`, safe `.onConflictDoUpdate(...)` when supported, and `.$unsafeUnscoped()` for raw continuation
 - `update(table).set(...).where(...)`
 - `delete(table).where(...)`
 - `query.<queryName>.findFirst(...)`
@@ -421,6 +434,7 @@ type ScopeByColumnOptions<TScope> = {
   queryName?: string;
   tableName?: string;
   insertKey?: string;
+  updateKey?: string; // defaults to insertKey
   columnName?: string;
   equals?: (rowValue: unknown, scopeValue: TScope) => boolean;
 };
@@ -429,12 +443,19 @@ type ScopeByColumnOptions<TScope> = {
 ### `defineScopedTable(table, rule)`
 
 ```ts
-type ScopedTableRule<TScope, TInsert = Record<string, unknown>> = {
+type ScopedTableRule<
+  TScope,
+  TInsert = Record<string, unknown>,
+  TUpdate = Record<string, unknown>,
+> = {
   table: Table;
   queryName?: string;
   tableName?: string;
   where: (scopeValue: TScope) => SQL | undefined;
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
+  validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
+  // Required for scoped onConflictDoUpdate(...).
+  hasScopeInConflictTarget?: (target: unknown) => boolean;
   // Required when createScopedDb({ strict: true }) is enabled.
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
 };
@@ -462,6 +483,8 @@ If a Drizzle upgrade changes the internal SQL chunk shape, this fails fast inste
 - `MissingScopedWhereError`
 - `MissingScopedPredicateError`
 - `InvalidScopedInsertError`
+- `InvalidScopedUpdateError`
+- `InvalidScopedConflictTargetError`
 
 You can replace these with custom error factories in `createScopedDb({ errors })`.
 

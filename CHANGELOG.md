@@ -4,6 +4,11 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Expose scoped PostgreSQL/SQLite `.onConflictDoUpdate(...)` and `.onConflictDoNothing(...)` after `.values(...)`; conflict updates are forwarded only after runtime validation proves the conflict target includes the scope and the `set` payload cannot move the row across scopes.
+- Add `InvalidScopedConflictTargetError` and the `invalidConflictTarget` error hook for scoped upsert validation failures.
+
 ## [0.8.0] - 2026-06-27
 
 ### Added
