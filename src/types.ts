@@ -39,6 +39,8 @@ export type ScopedTableRule<
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
   /** Optional update payload validator. Return true only when the updated fields are valid for scopeValue. */
   validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
+  /** Optional validator for safe scoped upserts. Return true only when the conflict target includes scope. */
+  hasScopeInConflictTarget?: (target: unknown) => boolean;
   /**
    * Optional strict-mode validator for checking whether user-supplied where already includes scope.
    * Required when `strict` mode is enabled; rules without a detector fail strict validation.
@@ -62,6 +64,7 @@ export type ScopedDbErrors<TScope> = {
     scopeName: string,
     scopeValue: TScope,
   ) => Error;
+  invalidConflictTarget?: (tableName: string, scopeName: string, scopeValue: TScope) => Error;
 };
 
 /** Options for creating a scoped Drizzle wrapper. */
@@ -195,15 +198,18 @@ export type ScopedMutationResult<TRaw = unknown, TTable = ScopedTable> = Promise
  * Terminal result of a scoped insert. Everything {@link ScopedMutationResult} offers (awaitable plus
  * a table-precise `.returning(...)` where the dialect supports it), and `$returningId()` on MySQL.
  *
- * Conflict/upsert methods (`onConflictDoNothing` / `onConflictDoUpdate` / `onDuplicateKeyUpdate`) are
- * intentionally NOT exposed here. Reach them through `.$unsafeUnscoped()`, a loud, local escape that
- * hands back the raw dialect builder after scoped `.values(...)` validation.
+ * PostgreSQL/SQLite conflict methods are exposed only when the dialect provides them. The runtime
+ * wrapper validates scoped `onConflictDoUpdate(...)` calls before forwarding; MySQL-style
+ * `onDuplicateKeyUpdate(...)` still requires `.$unsafeUnscoped()` because it does not name a conflict
+ * target that the scoped facade can inspect.
  */
 export type ScopedInsertResult<TRaw = unknown, TTable = ScopedTable> = ScopedMutationResult<
   TRaw,
   TTable
 > &
-  ForwardMethod<TRaw, "$returningId"> & {
+  ForwardMethod<TRaw, "$returningId"> &
+  ForwardChainMethod<TRaw, TTable, "onConflictDoNothing"> &
+  ForwardChainMethod<TRaw, TTable, "onConflictDoUpdate"> & {
     /**
      * Return the raw dialect insert builder, already carrying this insert's scoped `.values(...)`
      * payload. Use it to chain conflict/upsert methods and audit their target/set/where clauses at
@@ -220,9 +226,9 @@ export type ScopedInsertResult<TRaw = unknown, TTable = ScopedTable> = ScopedMut
  * unchanged; this variant rewrites the return type. Contributes nothing for dialects lacking the method.
  */
 export type ForwardChainMethod<TRaw, TTable, TName extends string> = [TRaw] extends [
-  { [K in TName]: (...args: infer TArgs) => unknown },
+  { [K in TName]: (...args: infer TArgs) => infer TReturn },
 ]
-  ? { [K in TName]: (...args: TArgs) => ScopedInsertResult<TRaw, TTable> }
+  ? { [K in TName]: (...args: TArgs) => ScopedInsertResult<TReturn, TTable> }
   : {};
 
 /**

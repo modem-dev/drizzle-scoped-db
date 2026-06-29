@@ -6,6 +6,7 @@ import {
   createScopedDb,
   type ScopedDb,
   defineScopedTable,
+  InvalidScopedConflictTargetError,
   InvalidScopedInsertError,
   InvalidScopedUpdateError,
   MissingScopedPredicateError,
@@ -42,6 +43,8 @@ type FakeDbState = {
   selectCondition?: SQL;
   joinConditions?: SQL[];
   insertValues?: unknown;
+  conflictConfig?: unknown;
+  conflictDidNothing?: boolean;
   updateCondition?: SQL;
   deleteCondition?: SQL;
   relationalCondition?: SQL;
@@ -167,9 +170,11 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
               return undefined;
             },
             onConflictDoNothing() {
+              state.conflictDidNothing = true;
               return result;
             },
-            onConflictDoUpdate(_config: unknown) {
+            onConflictDoUpdate(config: unknown) {
+              state.conflictConfig = config;
               return result;
             },
           };
@@ -573,7 +578,12 @@ describe("createScopedDb", () => {
       scopeName: "workspace",
       scopeValue: "workspace-1",
       strict: false,
-      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+      rules: [
+        scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+          insertKey: "workspaceId",
+          queryName: "projects",
+        }),
+      ],
     });
 
     rawDb.select().from(projectsTbl).prepare();
@@ -641,21 +651,23 @@ describe("createScopedDb", () => {
       .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
       .returning();
 
-    // Conflict/upsert methods intentionally require an explicit unsafe transition from the scoped facade.
+    // PostgreSQL/SQLite conflict methods can be chained directly; onConflictDoUpdate is
+    // runtime-validated for a scoped target and a scope-safe set payload.
     const scopedConflictInsert = scopedDb
       .insert(projectsTbl)
       .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" });
-    scopedConflictInsert.$unsafeUnscoped().onConflictDoNothing().returning();
+    scopedConflictInsert.onConflictDoNothing().returning();
     const scopedConflictUpdateInsert = scopedDb
       .insert(projectsTbl)
       .values({ id: "project-3", workspaceId: "workspace-1", name: "Icebox" });
+    scopedConflictUpdateInsert.onConflictDoUpdate({
+      target: [projectsTbl.workspaceId, projectsTbl.id],
+      set: { name: "Icebox" },
+    });
+    // The local escape is still available for intentionally unaudited raw continuation.
     scopedConflictUpdateInsert
       .$unsafeUnscoped()
       .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Icebox" } });
-    // @ts-expect-error Scoped inserts do not expose conflict/upsert methods before the unsafe transition.
-    void scopedConflictInsert.onConflictDoNothing;
-    // @ts-expect-error Scoped inserts do not expose conflict/upsert methods before the unsafe transition.
-    void scopedConflictUpdateInsert.onConflictDoUpdate;
     scopedDb
       .update(projectsTbl)
       .set({ name: "Updated" })
@@ -676,7 +688,7 @@ describe("createScopedDb", () => {
 
   it("forwards only safe dialect terminal methods (MySQL vs Postgres)", () => {
     // A MySQL-shaped DB: inserts resolve to row-count metadata with MySQL's inserted-id helper,
-    // and have no RETURNING clause. Upsert helpers are intentionally hidden by the scoped facade.
+    // and have no RETURNING clause. MySQL upsert helpers are intentionally hidden by the scoped facade.
     type MySqlLikeDb = {
       insert(table: unknown): {
         values(values: unknown): {
@@ -707,10 +719,10 @@ describe("createScopedDb", () => {
         .values({ id: "p", workspaceId: "w", name: "Roadmap" });
       mysqlInsert.$unsafeUnscoped().onDuplicateKeyUpdate({ set: {} });
 
-      // The scoped result itself hides every conflict/upsert method, regardless of dialect.
-      // @ts-expect-error Scoped inserts do not expose conflict/upsert methods before the unsafe transition.
+      // The scoped result exposes only dialect conflict methods that can be validated safely.
+      // @ts-expect-error MySQL-style insert builders have no onConflictDoNothing().
       void mysqlInsert.onConflictDoNothing;
-      // @ts-expect-error Scoped inserts do not expose conflict/upsert methods before the unsafe transition.
+      // @ts-expect-error MySQL's targetless upsert helper still requires the unsafe transition.
       void mysqlInsert.onDuplicateKeyUpdate;
       // @ts-expect-error MySQL-style insert builders expose no RETURNING clause.
       void mysqlInsert.returning;
@@ -1122,6 +1134,74 @@ describe("createScopedDb", () => {
     ]);
   });
 
+  it("supports scoped Postgres-style upserts when the conflict target includes scope", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const config = {
+      target: [projectsTbl.workspaceId, projectsTbl.id],
+      set: { name: "Updated" },
+    };
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .onConflictDoUpdate(config)
+      .returning();
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" })
+      .onConflictDoNothing();
+
+    expect(rawDb._state.conflictConfig).toBe(config);
+    expect(rawDb._state.conflictDidNothing).toBe(true);
+  });
+
+  it("rejects scoped upserts whose conflict target or set payload can cross scope", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+        .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } }),
+    ).toThrow(InvalidScopedConflictTargetError);
+
+    const scopedDbWithoutInsertValidation = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { updateKey: "workspaceId" })],
+    });
+    expect(() =>
+      scopedDbWithoutInsertValidation
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-2", name: "Wrong" })
+        .onConflictDoUpdate({
+          target: [projectsTbl.workspaceId, projectsTbl.id],
+          set: { name: "Updated" },
+        }),
+    ).toThrow(InvalidScopedConflictTargetError);
+
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+        .onConflictDoUpdate({
+          target: [projectsTbl.workspaceId, projectsTbl.id],
+          set: { workspaceId: "workspace-2" },
+        }),
+    ).toThrow(InvalidScopedUpdateError);
+  });
+
   it("exposes the raw insert builder via $unsafeUnscoped() only after scoped values validation runs", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
@@ -1164,6 +1244,7 @@ describe("createScopedDb", () => {
     const customMissingScope = new Error("custom missing scope");
     const customInvalidInsert = new Error("custom invalid insert");
     const customInvalidUpdate = new Error("custom invalid update");
+    const customInvalidConflictTarget = new Error("custom invalid conflict target");
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
@@ -1186,6 +1267,7 @@ describe("createScopedDb", () => {
         missingScope: () => customMissingScope,
         invalidInsert: () => customInvalidInsert,
         invalidUpdate: () => customInvalidUpdate,
+        invalidConflictTarget: () => customInvalidConflictTarget,
       },
     });
 
@@ -1205,6 +1287,12 @@ describe("createScopedDb", () => {
         .set({ workspaceId: "workspace-2" })
         .where(eq(projectsTbl.id, "project-1")),
     ).toThrow(customInvalidUpdate);
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+        .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } }),
+    ).toThrow(customInvalidConflictTarget);
   });
 
   it("throws the default missing-scope error when strict mode is enabled for a custom rule without a scope detector", () => {

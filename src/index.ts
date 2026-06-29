@@ -1,5 +1,6 @@
 export { assertDrizzleCompatibility, containsColumnFilter } from "./drizzle-compat.js";
 export {
+  InvalidScopedConflictTargetError,
   InvalidScopedInsertError,
   InvalidScopedUpdateError,
   MissingScopedPredicateError,
