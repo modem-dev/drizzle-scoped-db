@@ -45,6 +45,8 @@ type FakeDbState = {
   insertValues?: unknown;
   conflictConfig?: unknown;
   conflictDidNothing?: boolean;
+  groupByColumns?: unknown[];
+  havingCondition?: SQL;
   updateCondition?: SQL;
   deleteCondition?: SQL;
   relationalCondition?: SQL;
@@ -62,6 +64,9 @@ type FakeWhereResult = {
   offset(n?: number): FakeWhereResult;
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
   orderBy(...columns: any[]): FakeWhereResult;
+  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+  groupBy(...columns: any[]): FakeWhereResult;
+  having(condition: SQL | undefined): FakeWhereResult;
 };
 
 type FakeFromBuilder = {
@@ -82,6 +87,7 @@ type FakeInsertResult = {
   returning(): unknown;
   onConflictDoNothing(): FakeInsertResult;
   onConflictDoUpdate(config: unknown): FakeInsertResult;
+  onDuplicateKeyUpdate(config: unknown): FakeInsertResult;
 };
 
 type FakeDb = {
@@ -177,6 +183,10 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
               state.conflictConfig = config;
               return result;
             },
+            onDuplicateKeyUpdate(config: unknown) {
+              state.conflictConfig = config;
+              return result;
+            },
           };
           return result;
         },
@@ -268,6 +278,15 @@ function createFromBuilder(state: FakeDbState): FakeFromBuilder {
         },
         // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
         orderBy(..._columns: any[]): FakeWhereResult {
+          return result;
+        },
+        // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
+        groupBy(...columns: any[]): FakeWhereResult {
+          state.groupByColumns = columns;
+          return result;
+        },
+        having(condition: SQL | undefined): FakeWhereResult {
+          state.havingCondition = condition;
           return result;
         },
       };
@@ -1000,7 +1019,7 @@ describe("createScopedDb", () => {
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(true);
   });
 
-  it("preserves scope predicate through .limit(), .offset(), and .orderBy() chaining", () => {
+  it("preserves scope predicate through select terminal-method chaining", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
@@ -1009,13 +1028,16 @@ describe("createScopedDb", () => {
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
+    const havingCondition = eq(projectsTbl.name, "Roadmap");
     const result = scopedDb
       .select()
       .from(projectsTbl)
       .where(eq(projectsTbl.id, "project-1"))
       .limit(10)
       .offset(5)
-      .orderBy(projectsTbl.id) as unknown as {
+      .orderBy(projectsTbl.id)
+      .groupBy(projectsTbl.id)
+      .having(havingCondition) as unknown as {
       where: (condition: SQL | undefined) => unknown;
     };
 
@@ -1023,6 +1045,8 @@ describe("createScopedDb", () => {
     expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
     expect(rawDb._state.selectCondition).toBeDefined();
     expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
+    expect(rawDb._state.groupByColumns).toEqual([projectsTbl.id]);
+    expect(rawDb._state.havingCondition).toBe(havingCondition);
   });
 
   it("prevents double .where() on scoped update results", () => {
@@ -1176,6 +1200,22 @@ describe("createScopedDb", () => {
         .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } }),
     ).toThrow(InvalidScopedConflictTargetError);
 
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+        .onConflictDoUpdate(null),
+    ).toThrow(InvalidScopedConflictTargetError);
+
+    const duplicateKeyInsert = scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" }) as unknown as {
+      onDuplicateKeyUpdate(config: unknown): unknown;
+    };
+    expect(() => duplicateKeyInsert.onDuplicateKeyUpdate({ set: { name: "Updated" } })).toThrow(
+      InvalidScopedConflictTargetError,
+    );
+
     const scopedDbWithoutInsertValidation = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
@@ -1199,6 +1239,13 @@ describe("createScopedDb", () => {
           target: [projectsTbl.workspaceId, projectsTbl.id],
           set: { workspaceId: "workspace-2" },
         }),
+    ).toThrow(InvalidScopedUpdateError);
+
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+        .onConflictDoUpdate({ target: [projectsTbl.workspaceId, projectsTbl.id] }),
     ).toThrow(InvalidScopedUpdateError);
   });
 
