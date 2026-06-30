@@ -20,8 +20,8 @@ export type RelationalWhereCallback<TTable> = (
 /** A relational query where clause, either as Drizzle SQL or as Drizzle's callback form. */
 export type RelationalWhere<TTable> = RelationalWhereCallback<TTable> | SQL | undefined;
 
-/** Drizzle 1.0 RQBv2 object-filter where shape. */
-export type RelationalObjectWhere = Record<string, unknown>;
+/** Object-filter where shape used by relational query adapters. */
+export type RelationalObjectFilter = Record<string, unknown>;
 
 /** A table-specific scoping rule. */
 export type ScopedTableRule<
@@ -54,7 +54,7 @@ export type ScopedTableRule<
     /** Drizzle 1.0 RQBv2 object-filter support for relational `db.query.*` wrappers. */
     rqbV2?: {
       /** Object filter that is always injected into RQBv2 relational find queries. */
-      where: (scopeValue: TScope) => RelationalObjectWhere | undefined;
+      where: (scopeValue: TScope) => RelationalObjectFilter | undefined;
       /** Strict-mode validator for checking whether a user RQBv2 object filter already includes scope. */
       hasScopeInWhere?: (condition: unknown) => boolean;
     };

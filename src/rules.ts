@@ -1,7 +1,7 @@
 import { type Column, eq } from "drizzle-orm";
 
 import { containsColumnFilter } from "./drizzle-compat.js";
-import { createRqbV2ColumnObjectFilter } from "./internal/relational/rqb-v2-object-filter.js";
+import { createColumnRelationalSupport } from "./internal/relational/rule-support.js";
 import type { ScopedTable, ScopedTableRule, ScopeByColumnOptions } from "./types.js";
 
 /** Create a scoping rule for the common case where one table column stores the scope value. */
@@ -33,9 +33,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
       : undefined,
     hasScopeInConflictTarget: (target) => conflictTargetContainsColumn(target, column, columnName),
     hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName, table),
-    relational: {
-      rqbV2: createRqbV2ColumnObjectFilter(table, column, columnName),
-    },
+    relational: createColumnRelationalSupport(table, column, columnName),
   };
 }
 

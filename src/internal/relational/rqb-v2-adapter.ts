@@ -1,4 +1,4 @@
-import type { RelationalObjectWhere, ScopedTableRule } from "../../types.js";
+import type { RelationalObjectFilter, ScopedTableRule } from "../../types.js";
 import type { NormalizedCreateScopedDbOptions } from "../options.js";
 import {
   createMissingScopeError,
@@ -39,10 +39,10 @@ export class RqbV2RelationalAdapter implements RelationalQueryAdapter {
 
   /** Wrap an RQBv2 relational query method to validate and inject scoped object filters. */
   private wrapMethod<TScope, TResult>(
-    originalMethod: RelationalMethod<RelationalObjectWhere, TResult>,
+    originalMethod: RelationalMethod<RelationalObjectFilter, TResult>,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
-  ): (config?: RelationalMethodConfig<RelationalObjectWhere>) => Promise<TResult> {
+  ): (config?: RelationalMethodConfig<RelationalObjectFilter>) => Promise<TResult> {
     return (config) => {
       const originalWhere = config?.where;
 
@@ -63,7 +63,7 @@ export class RqbV2RelationalAdapter implements RelationalQueryAdapter {
 
   /** Validate that the user-supplied object filter satisfies strict scoped-query rules. */
   private assertWhereAllowed<TScope>(
-    where: RelationalObjectWhere | undefined,
+    where: RelationalObjectFilter | undefined,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
   ): void {
@@ -78,15 +78,15 @@ export class RqbV2RelationalAdapter implements RelationalQueryAdapter {
 
   /** Compose a user object-filter with the mandatory scope filter in RQBv2's own language. */
   private mergeWhere(
-    userWhere: RelationalObjectWhere | undefined,
-    scopedWhere: RelationalObjectWhere,
-  ): RelationalObjectWhere {
+    userWhere: RelationalObjectFilter | undefined,
+    scopedWhere: RelationalObjectFilter,
+  ): RelationalObjectFilter {
     return userWhere ? { AND: [userWhere, scopedWhere] } : scopedWhere;
   }
 
   /** RQBv2 does not accept v1 callback/SQL where shapes. Reject them before Drizzle can ignore them. */
   private assertSupportedWhere<TScope>(
-    where: RelationalObjectWhere | undefined,
+    where: RelationalObjectFilter | undefined,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
   ): void {
