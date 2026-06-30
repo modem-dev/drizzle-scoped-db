@@ -68,10 +68,13 @@ describe("Drizzle compatibility helpers", () => {
       scopedDb.select().from(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1")),
     ).not.toThrow();
 
+    // An alias of the scoped table itself still scopes the query. Drizzle's relational query API
+    // references the scoped table through an alias of the schema's TS name, so a scope filter on an
+    // alias of the same underlying table must be accepted (only genuinely different tables fail).
     const parent = aliasedTable(projectsTbl, "parent");
     expect(() =>
       scopedDb.select().from(projectsTbl).where(eq(parent.workspaceId, "workspace-1")),
-    ).toThrow(MissingScopedPredicateError);
+    ).not.toThrow();
   });
 
   it("rejects aliases of scoped tables unless the alias has its own explicit rule", () => {
@@ -117,10 +120,14 @@ describe("Drizzle compatibility helpers", () => {
     expect(containsColumnFilter(auditCondition, "workspace_id", projectsTbl)).toBe(false);
     expect(containsColumnFilter(auditCondition, "workspace_id", projectsAuditTbl)).toBe(true);
 
+    // An alias of the scoped table (alias name `parent` differs from the SQL name, exactly as
+    // Drizzle's relational query API aliases columns to a table's TS name) resolves to the same
+    // underlying table identity, so it satisfies the scoped table's check. A genuinely different
+    // table (projectsAuditTbl, above) still does not.
     const parent = aliasedTable(projectsTbl, "parent");
     const parentCondition = eq(parent.workspaceId, "workspace-1");
     expect(containsColumnFilter(parentCondition, "workspace_id", parent)).toBe(true);
-    expect(containsColumnFilter(parentCondition, "workspace_id", projectsTbl)).toBe(false);
+    expect(containsColumnFilter(parentCondition, "workspace_id", projectsTbl)).toBe(true);
   });
 
   it("assertDrizzleCompatibility accepts an optional table for stricter checking", () => {

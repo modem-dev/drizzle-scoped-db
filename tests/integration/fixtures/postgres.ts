@@ -1,5 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 
@@ -17,12 +17,7 @@ export const pgProjects = pgTable(
 
 export type PgIntegrationDb = PgliteDatabase<Record<string, never>> & { $client: PGlite };
 
-export async function createPgIntegrationDb(): Promise<PgIntegrationDb> {
-  const client = new PGlite();
-  const db = drizzle({ client });
-
-  await db.execute(
-    sql.raw(`
+const PROJECTS_DDL = `
     create table integration_projects (
       id text primary key,
       workspace_id text not null,
@@ -30,13 +25,59 @@ export async function createPgIntegrationDb(): Promise<PgIntegrationDb> {
       name text not null,
       region_id text
     );
-  `),
-  );
+  `;
+
+export async function createPgIntegrationDb(): Promise<PgIntegrationDb> {
+  const client = new PGlite();
+  const db = drizzle({ client });
+
+  await db.execute(sql.raw(PROJECTS_DDL));
 
   return db;
 }
 
-export async function seedPgProjects(db: PgIntegrationDb): Promise<void> {
+/**
+ * Relational-query schema whose KEY (the Drizzle `tsName`) deliberately differs from the table's
+ * SQL name (`integration_projects`). Drizzle's relational query API aliases callback columns to
+ * this key, mirroring real consumer schemas like `{ groupsTbl: pgTable("groups", ...) }`.
+ */
+export const pgRelationalSchema = { projectsTbl: pgProjects };
+
+/**
+ * Minimal relational-query surface the regression test needs, typed locally so the fixture builds
+ * across Drizzle's locked and release-candidate dependency matrices (the relational-query generics
+ * differ between versions). The runtime method is still Drizzle's own.
+ */
+export type PgRelationalDb = PgIntegrationDb & {
+  query: {
+    projectsTbl: {
+      findMany(config: {
+        where: (
+          columns: { id: unknown; workspaceId: unknown },
+          operators: { eq: (left: unknown, right: unknown) => SQL },
+        ) => SQL | undefined;
+      }): Promise<Array<typeof pgProjects.$inferSelect>>;
+    };
+  };
+};
+
+export async function createPgRelationalDb(): Promise<PgRelationalDb> {
+  const client = new PGlite();
+  // Cast through the bare drizzle signature: the typed schema overload differs across Drizzle
+  // versions, but the runtime relational query API is the same. The returned db is given the
+  // explicit PgRelationalDb shape above.
+  const makeDb = drizzle as unknown as (config: {
+    client: PGlite;
+    schema: typeof pgRelationalSchema;
+  }) => PgIntegrationDb;
+  const db = makeDb({ client, schema: pgRelationalSchema });
+
+  await db.execute(sql.raw(PROJECTS_DDL));
+
+  return db as unknown as PgRelationalDb;
+}
+
+export async function seedPgProjects(db: Pick<PgIntegrationDb, "insert">): Promise<void> {
   await db.insert(pgProjects).values([
     {
       id: "project-1",
@@ -55,6 +96,6 @@ export async function seedPgProjects(db: PgIntegrationDb): Promise<void> {
   ]);
 }
 
-export async function closePgIntegrationDb(db: PgIntegrationDb): Promise<void> {
+export async function closePgIntegrationDb(db: Pick<PgIntegrationDb, "$client">): Promise<void> {
   await db.$client.close();
 }
