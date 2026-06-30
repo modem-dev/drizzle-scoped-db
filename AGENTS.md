@@ -14,7 +14,8 @@
 - `src/internal/scope.ts` — strict validation, scope predicate composition, and error factories.
 - `src/internal/options.ts` — option normalization and scoped table rule lookup.
 - `src/drizzle-compat.ts` — Drizzle SQL chunk inspection helpers used by strict validation.
-- `src/__tests__/` — Vitest suites grouped by behavior: select guardrails, mutation guardrails, relational wrappers, API surface, custom rules/errors, Drizzle compatibility helpers, and real-driver integration tests.
+- `tests/unit/` — fake-builder Vitest suites grouped by behavior: select guardrails, mutation guardrails, relational wrappers, API surface, custom rules/errors, and Drizzle compatibility helpers.
+- `tests/integration/` — real-driver integration suites for Postgres/PGlite and SQLite.
 - `README.md` — OSS-facing package documentation.
 - `CHANGELOG.md` — user-visible change log.
 
@@ -42,7 +43,7 @@ pnpm coverage
 pnpm build
 ```
 
-Integration tests under `src/__tests__/integration/` run as part of `pnpm test` and CI's locked/RC Drizzle matrix.
+Integration tests under `tests/integration/` run as part of `pnpm test` and CI's locked/RC Drizzle matrix.
 
 For changes that add proxies, wrappers, hot-path query guards, or other performance-sensitive behavior, also run the release benchmarks and compare against the latest committed baseline:
 
