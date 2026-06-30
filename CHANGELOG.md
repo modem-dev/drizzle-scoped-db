@@ -8,6 +8,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
+- Restructure README as a shorter getting-started overview and move deeper usage/API material into `docs/`.
+
 ### Fixed
 
 ## [0.10.0] - 2026-06-30

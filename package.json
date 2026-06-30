@@ -21,6 +21,8 @@
   },
   "files": [
     "dist",
+    "docs",
+    "benchmarks/release/README.md",
     "README.md",
     "LICENSE",
     "SECURITY.md"
