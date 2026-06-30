@@ -4,6 +4,14 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Scoped PostgreSQL/SQLite `.onConflictDoUpdate(...)` now injects the table rule's `where(scopeValue)` predicate into `setWhere`, so cross-scope conflicts safely no-op.
+
+### Changed
+
+- Relax scoped PostgreSQL/SQLite `.onConflictDoUpdate(...)` conflict-target validation: any conflict target is allowed while insert/update payload validators still run and scope-column reassignment still throws.
+
 ## [0.9.0] - 2026-06-29
 
 ### Added

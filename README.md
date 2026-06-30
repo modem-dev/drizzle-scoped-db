@@ -325,32 +325,34 @@ const scopedDb = createScopedDb(db, {
 
 ### Scoped upserts
 
-PostgreSQL/SQLite conflict updates can stay on the scoped facade when the conflict target includes the scope column and the update payload cannot move the row across scopes:
+PostgreSQL/SQLite conflict updates can stay on the scoped facade with any conflict target when the update payload cannot move the row across scopes:
 
 ```ts
 workspaceDb
   .insert(records)
   .values({ workspaceId, regionId, key, value }) // scope-validated here
-  .onConflictDoUpdate({ target: [records.workspaceId, records.key], set: { value } });
+  .onConflictDoUpdate({ target: records.key, set: { value } });
 ```
 
-For `scopeByColumn`, this works when `insertKey` is configured; that validates `.values(...)` and also validates `set` payloads unless you override the update field with `updateKey`. Custom `defineScopedTable` rules can opt in with `validateInsert`, `validateUpdate`, and `hasScopeInConflictTarget`.
+The wrapper forwards your `target`, `set`, and `targetWhere`, and auto-injects the rule's scope predicate into `setWhere`. If a conflict points at a row from another scope, the `DO UPDATE ... WHERE scope = value` guard is false, so the conflict safely no-ops instead of updating or inserting.
 
-When you need to step outside that surface, use an explicit escape hatch so you (and your agent) can see the audit boundary.
+For `scopeByColumn`, this works when `insertKey` is configured; that validates `.values(...)` and also validates `set` payloads unless you override the update field with `updateKey`. Custom `defineScopedTable` rules can opt in with `validateInsert` and `validateUpdate`; the guard is derived from the rule's existing `where(scopeValue)` predicate.
+
+When you need deliberate cross-scope writes, use an explicit escape hatch so you (and your agent) can see the audit boundary.
 
 ### Local escape: `.$unsafeUnscoped()`
 
-Use after scoped insert validation for conflict handlers the scoped facade cannot prove safe, such as targetless MySQL `onDuplicateKeyUpdate(...)`, conflict targets that do not include scope, or custom rules without upsert validators:
+Use after scoped insert validation for conflict handlers the scoped facade intentionally will not guard, such as targetless MySQL `onDuplicateKeyUpdate(...)`, custom rules without upsert validators, or deliberate cross-scope writes like reassigning a row's owner during a connect flow:
 
 ```ts
 workspaceDb
   .insert(records)
   .values({ workspaceId, regionId, key, value }) // scope-validated here
   .$unsafeUnscoped()
-  .onConflictDoUpdate({ target: [records.key], set: { value } });
+  .onConflictDoUpdate({ target: records.key, set: { workspaceId: newWorkspaceId } });
 ```
 
-The inserted values were checked, but the conflict target, `set`, and follow-up `where` clauses are yours to keep scope-safe. Prefer unique keys that include the scope columns, and never let `set` move a row across scopes.
+The inserted values were checked, but the conflict target, `set`, and follow-up `where` clauses are yours to keep scope-safe. Prefer the scoped facade for normal upserts; it injects the `setWhere` guard automatically.
 
 ### Root escape: `_unsafeUnscopedDb`
 
@@ -454,7 +456,7 @@ type ScopedTableRule<
   where: (scopeValue: TScope) => SQL | undefined;
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
   validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
-  // Required for scoped onConflictDoUpdate(...).
+  // Legacy detector retained for compatibility; scoped onConflictDoUpdate no longer consults it.
   hasScopeInConflictTarget?: (target: unknown) => boolean;
   // Required when createScopedDb({ strict: true }) is enabled.
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;

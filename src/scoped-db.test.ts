@@ -671,7 +671,7 @@ describe("createScopedDb", () => {
       .returning();
 
     // PostgreSQL/SQLite conflict methods can be chained directly; onConflictDoUpdate is
-    // runtime-validated for a scoped target and a scope-safe set payload.
+    // runtime-validated for a scope-safe set payload and guarded with scoped setWhere.
     const scopedConflictInsert = scopedDb
       .insert(projectsTbl)
       .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" });
@@ -680,13 +680,13 @@ describe("createScopedDb", () => {
       .insert(projectsTbl)
       .values({ id: "project-3", workspaceId: "workspace-1", name: "Icebox" });
     scopedConflictUpdateInsert.onConflictDoUpdate({
-      target: [projectsTbl.workspaceId, projectsTbl.id],
+      target: projectsTbl.id,
       set: { name: "Icebox" },
     });
     // The local escape is still available for intentionally unaudited raw continuation.
     scopedConflictUpdateInsert
       .$unsafeUnscoped()
-      .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Icebox" } });
+      .onConflictDoUpdate({ target: projectsTbl.id, set: { workspaceId: "workspace-2" } });
     scopedDb
       .update(projectsTbl)
       .set({ name: "Updated" })
@@ -1158,7 +1158,92 @@ describe("createScopedDb", () => {
     ]);
   });
 
-  it("supports scoped Postgres-style upserts when the conflict target includes scope", () => {
+  it("supports scoped Postgres-style upserts on non-scope conflict targets by injecting setWhere", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const targetWhere = eq(projectsTbl.regionId, "region-1");
+    const config = {
+      target: projectsTbl.id,
+      targetWhere,
+      set: { name: "Updated" },
+    };
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .onConflictDoUpdate(config)
+      .returning();
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" })
+      .onConflictDoNothing();
+
+    const conflictConfig = rawDb._state.conflictConfig as typeof config & { setWhere?: SQL };
+    expect(conflictConfig).not.toBe(config);
+    expect(conflictConfig.target).toBe(projectsTbl.id);
+    expect(conflictConfig.targetWhere).toBe(targetWhere);
+    expect(conflictConfig.set).toBe(config.set);
+    expect(conflictConfig.setWhere).toBeDefined();
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
+    expect(rawDb._state.conflictDidNothing).toBe(true);
+  });
+
+  it("combines caller-supplied upsert setWhere with the scope guard", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+    const callerSetWhere = eq(projectsTbl.name, "Draft");
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .onConflictDoUpdate({
+        target: projectsTbl.id,
+        set: { name: "Updated" },
+        setWhere: callerSetWhere,
+      });
+
+    const conflictConfig = rawDb._state.conflictConfig as { setWhere?: SQL };
+    expect(conflictConfig.setWhere).toBeDefined();
+    expect(conflictConfig.setWhere).not.toBe(callerSetWhere);
+    expect(containsColumnFilter(conflictConfig.setWhere, "name", projectsTbl)).toBe(true);
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
+  });
+
+  it("folds deprecated upsert where into guarded setWhere", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+    const legacyWhere = eq(projectsTbl.regionId, "region-1");
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .onConflictDoUpdate({
+        target: projectsTbl.id,
+        set: { name: "Updated" },
+        where: legacyWhere,
+      });
+
+    const conflictConfig = rawDb._state.conflictConfig as { where?: SQL; setWhere?: SQL };
+    expect("where" in conflictConfig).toBe(false);
+    expect(conflictConfig.setWhere).toBeDefined();
+    expect(containsColumnFilter(conflictConfig.setWhere, "region_id", projectsTbl)).toBe(true);
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
+  });
+
+  it("injects setWhere even when the upsert conflict target already includes scope", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
@@ -1174,31 +1259,22 @@ describe("createScopedDb", () => {
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
-      .onConflictDoUpdate(config)
-      .returning();
-    scopedDb
-      .insert(projectsTbl)
-      .values({ id: "project-2", workspaceId: "workspace-1", name: "Backlog" })
-      .onConflictDoNothing();
+      .onConflictDoUpdate(config);
 
-    expect(rawDb._state.conflictConfig).toBe(config);
-    expect(rawDb._state.conflictDidNothing).toBe(true);
+    const conflictConfig = rawDb._state.conflictConfig as typeof config & { setWhere?: SQL };
+    expect(conflictConfig.target).toBe(config.target);
+    expect(conflictConfig.set).toBe(config.set);
+    expect(conflictConfig.setWhere).toBeDefined();
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
   });
 
-  it("rejects scoped upserts whose conflict target or set payload can cross scope", () => {
+  it("rejects scoped upserts with invalid configs, missing validators, or cross-scope set payloads", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
     });
-
-    expect(() =>
-      scopedDb
-        .insert(projectsTbl)
-        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
-        .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } }),
-    ).toThrow(InvalidScopedConflictTargetError);
 
     expect(() =>
       scopedDb
@@ -1229,6 +1305,24 @@ describe("createScopedDb", () => {
           target: [projectsTbl.workspaceId, projectsTbl.id],
           set: { name: "Updated" },
         }),
+    ).toThrow(InvalidScopedConflictTargetError);
+
+    const scopedDbWithoutScopeGuard = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [
+        defineScopedTable<string, typeof projectsTbl>(projectsTbl, {
+          where: () => undefined,
+          validateInsert: () => true,
+          validateUpdate: () => true,
+        }),
+      ],
+    });
+    expect(() =>
+      scopedDbWithoutScopeGuard
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+        .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } }),
     ).toThrow(InvalidScopedConflictTargetError);
 
     expect(() =>
@@ -1338,7 +1432,7 @@ describe("createScopedDb", () => {
       scopedDb
         .insert(projectsTbl)
         .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
-        .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } }),
+        .onConflictDoUpdate(null),
     ).toThrow(customInvalidConflictTarget);
   });
 
