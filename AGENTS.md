@@ -29,6 +29,7 @@
 - Keep scoped upserts safe by deriving guards from `rule.where(scopeValue)` and injecting them into `setWhere`; do not require conflict targets to include the scope column.
 - Do not add application-internal dependencies to this standalone package.
 - Prefer behavior-focused tests over implementation-only assertions, especially security regression tests for scope bypasses and escape boundaries.
+- Exercise database behavior against a real driver in `tests/integration/` (PGlite/SQLite), not mocks. The fake-builder unit suites in `tests/unit/` are for fast guardrail logic; they do not reproduce Drizzle runtime behavior (e.g. how the relational query API aliases callback columns), so they must not be the only coverage for anything that depends on real query construction. When a bug only reproduces against a real database, add or extend an integration test — do not pave over it with a mock that asserts the convenient shape.
 
 ## Validation
 
@@ -43,7 +44,7 @@ pnpm coverage
 pnpm build
 ```
 
-Integration tests under `tests/integration/` run as part of `pnpm test` and CI's locked/RC Drizzle matrix.
+Integration tests under `tests/integration/` run as part of `pnpm test` and CI's locked/RC Drizzle matrix. They must run against a real driver — when an API only exists on one Drizzle line (for example, the schema-only relational callback `where` predates the 1.0 RQBv2 object-filter API), feature-detect and skip transparently on the unsupported matrix rather than mocking the database to force a pass.
 
 For changes that add proxies, wrappers, hot-path query guards, or other performance-sensitive behavior, also run the release benchmarks and compare against the latest committed baseline:
 
