@@ -12,7 +12,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
   options: ScopeByColumnOptions<TScope> = {},
 ): ScopedTableRule<TScope, TTable> {
   const columnName = options.columnName ?? getColumnName(column);
-  const columnKey = getColumnKey(table, column, columnName);
+  const rqbV2Relational = createRqbV2RelationalSupport(table, column, columnName);
   const equals = options.equals ?? Object.is;
   const updateKey = options.updateKey ?? options.insertKey;
 
@@ -35,12 +35,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
       : undefined,
     hasScopeInConflictTarget: (target) => conflictTargetContainsColumn(target, column, columnName),
     hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName, table),
-    relational: columnKey
-      ? {
-          where: (scopeValue) => ({ [columnKey]: scopeValue }),
-          hasScopeInWhere: (condition) => containsRelationalColumnFilter(condition, columnKey),
-        }
-      : undefined,
+    relational: rqbV2Relational,
   };
 }
 
@@ -85,8 +80,29 @@ function hasColumnName(candidate: unknown, columnName: string): boolean {
   );
 }
 
-/** Resolve the TypeScript property key RQBv2 object filters use for this column. */
-function getColumnKey(table: object, column: Column, columnName: string): string | undefined {
+/** Build Drizzle 1.0 RQBv2 object-filter support for column-scoped rules. */
+function createRqbV2RelationalSupport<TScope>(
+  table: object,
+  column: Column,
+  columnName: string,
+): ScopedTableRule<TScope>["relational"] {
+  const objectFilterKey = getRqbV2ObjectFilterColumnKey(table, column, columnName);
+  if (!objectFilterKey) {
+    return undefined;
+  }
+
+  return {
+    where: (scopeValue) => ({ [objectFilterKey]: scopeValue }),
+    hasScopeInWhere: (condition) => containsRqbV2ObjectFilterColumn(condition, objectFilterKey),
+  };
+}
+
+/** Resolve the TypeScript property key that RQBv2 object filters use for this column. */
+function getRqbV2ObjectFilterColumnKey(
+  table: object,
+  column: Column,
+  columnName: string,
+): string | undefined {
   const columns = (table as Record<symbol, unknown>)[TABLE_COLUMNS];
   if (!isColumnMap(columns)) {
     return undefined;
@@ -106,26 +122,26 @@ function isColumnMap(value: unknown): value is Record<string, unknown> {
 }
 
 /** Check RQBv2 object filters for the scope column at the current table level or logical nesting. */
-function containsRelationalColumnFilter(condition: unknown, columnKey: string): boolean {
+function containsRqbV2ObjectFilterColumn(condition: unknown, objectFilterKey: string): boolean {
   if (!isColumnMap(condition)) {
     return false;
   }
 
-  if (Object.hasOwn(condition, columnKey) && condition[columnKey] !== undefined) {
+  if (Object.hasOwn(condition, objectFilterKey) && condition[objectFilterKey] !== undefined) {
     return true;
   }
 
   return (
-    containsLogicalRelationalFilter(condition.AND, columnKey) ||
-    containsLogicalRelationalFilter(condition.OR, columnKey) ||
-    containsLogicalRelationalFilter(condition.NOT, columnKey)
+    containsLogicalRqbV2ObjectFilter(condition.AND, objectFilterKey) ||
+    containsLogicalRqbV2ObjectFilter(condition.OR, objectFilterKey) ||
+    containsLogicalRqbV2ObjectFilter(condition.NOT, objectFilterKey)
   );
 }
 
-function containsLogicalRelationalFilter(value: unknown, columnKey: string): boolean {
+function containsLogicalRqbV2ObjectFilter(value: unknown, objectFilterKey: string): boolean {
   if (Array.isArray(value)) {
-    return value.some((item) => containsRelationalColumnFilter(item, columnKey));
+    return value.some((item) => containsRqbV2ObjectFilterColumn(item, objectFilterKey));
   }
 
-  return containsRelationalColumnFilter(value, columnKey);
+  return containsRqbV2ObjectFilterColumn(value, objectFilterKey);
 }
