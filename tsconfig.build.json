@@ -9,5 +9,5 @@
     "sourceMap": true,
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.build.tsbuildinfo"
   },
-  "include": ["src/index.ts"]
+  "include": ["src/index.ts", "src/eslint.ts", "src/lint-escapes.ts", "src/cli.ts"]
 }

@@ -362,6 +362,47 @@ workspaceDb._unsafeUnscopedDb;
 
 Common cases: migrations, admin jobs, test setup, cross-scope maintenance, raw SQL, CTEs/subqueries, `$dynamic`, or query shapes the scoped facade does not model.
 
+### Auditing escape hatches in CI
+
+The package ships two optional checks for `_unsafeUnscopedDb`, `_raw`, `.$unsafeUnscoped()`, and `extractRawDb(...)`.
+
+ESLint flat config:
+
+```ts
+import scopedDb from "@modemdev/drizzle-scoped-db/eslint";
+
+export default [
+  scopedDb.configs.strict,
+  {
+    rules: {
+      "drizzle-scoped-db/require-unsafe-escape-reason": [
+        "error",
+        { commentPattern: "drizzle-scoped-db-escape-ok:" },
+      ],
+    },
+  },
+];
+```
+
+Oxlint/standalone projects can add the scanner next to `oxlint`:
+
+```json
+{
+  "scripts": {
+    "lint": "oxlint . --deny-warnings && drizzle-scoped-db lint-escapes src --allow-with-comment"
+  }
+}
+```
+
+Then justify each intentional escape near the call site:
+
+```ts
+// drizzle-scoped-db-escape-ok: conflict target includes workspace_id; set does not change scope
+await workspaceDb.insert(records).values(row).$unsafeUnscoped().onConflictDoUpdate(...);
+```
+
+Use `drizzle-scoped-db lint-escapes --help` for scanner options.
+
 ## Security model
 
 `drizzle-scoped-db` protects supported Drizzle query-builder calls that go through the scoped wrapper. It is not a complete database isolation system and cannot protect code that bypasses the scoped capability.
