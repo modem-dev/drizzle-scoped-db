@@ -4,10 +4,33 @@ import {
   createScopedDb,
   MissingScopedPredicateError,
   MissingScopedWhereError,
+  defineScopedTable,
   scopeByColumn,
   projectsTbl,
   createFakeDb,
 } from "./fixtures";
+
+const entityKind = Symbol.for("drizzle:entityKind");
+
+class FakeRqbV2TableQuery {
+  static [entityKind] = "PgRelationalQueryBuilderV2";
+
+  private readonly state: { relationalObjectWhere?: unknown };
+
+  constructor(state: { relationalObjectWhere?: unknown }) {
+    this.state = state;
+  }
+
+  async findFirst(config?: { where?: Record<string, unknown> }) {
+    this.state.relationalObjectWhere = config?.where;
+    return { where: config?.where };
+  }
+
+  async findMany(config?: { where?: Record<string, unknown> }) {
+    this.state.relationalObjectWhere = config?.where;
+    return [{ where: config?.where }];
+  }
+}
 
 describe("createScopedDb relational query guardrails", () => {
   it("wraps relational query methods when a rule declares the query property name", async () => {
@@ -100,5 +123,104 @@ describe("createScopedDb relational query guardrails", () => {
     });
 
     expect(() => scopedDb.query.projects.findFirst()).toThrow(MissingScopedWhereError);
+  });
+
+  it("uses an explicit RQBv2 adapter for relational object filters", async () => {
+    const state: { relationalObjectWhere?: unknown } = {};
+    const rawDb = {
+      ...createFakeDb(),
+      query: { projects: new FakeRqbV2TableQuery(state) },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    await scopedDb.query.projects.findFirst();
+    expect(state.relationalObjectWhere).toEqual({ workspaceId: "workspace-1" });
+
+    await scopedDb.query.projects.findMany({ where: { id: "project-1" } });
+    expect(state.relationalObjectWhere).toEqual({
+      AND: [{ id: "project-1" }, { workspaceId: "workspace-1" }],
+    });
+  });
+
+  it("enforces strict RQBv2 object-filter scope validation before injection", async () => {
+    const state: { relationalObjectWhere?: unknown } = {};
+    const rawDb = {
+      ...createFakeDb(),
+      query: { projects: new FakeRqbV2TableQuery(state) },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    expect(() => scopedDb.query.projects.findMany()).toThrow(MissingScopedWhereError);
+    expect(() => scopedDb.query.projects.findMany({ where: { id: "project-1" } })).toThrow(
+      MissingScopedPredicateError,
+    );
+
+    await scopedDb.query.projects.findMany({
+      where: { AND: [{ id: "project-1" }, { workspaceId: "workspace-1" }] },
+    });
+    expect(state.relationalObjectWhere).toEqual({
+      AND: [
+        { AND: [{ id: "project-1" }, { workspaceId: "workspace-1" }] },
+        { workspaceId: "workspace-1" },
+      ],
+    });
+  });
+
+  it("rejects RQBv2 callback/SQL where shapes and custom rules without object-filter support", async () => {
+    const state: { relationalObjectWhere?: unknown } = {};
+    const rawDb = {
+      ...createFakeDb(),
+      query: { projects: new FakeRqbV2TableQuery(state) },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    expect(() => scopedDb.query.projects.findMany({ where: null as never })).toThrow(
+      "Unsupported RQBv2 relational where",
+    );
+    expect(() => scopedDb.query.projects.findMany({ where: [] as never })).toThrow(
+      "Unsupported RQBv2 relational where",
+    );
+    expect(() => scopedDb.query.projects.findMany({ where: (() => ({})) as never })).toThrow(
+      "Unsupported RQBv2 relational where",
+    );
+    expect(() => scopedDb.query.projects.findMany({ where: { getSQL: () => undefined } })).toThrow(
+      "Unsupported RQBv2 relational where",
+    );
+    expect(() =>
+      scopedDb.query.projects.findMany({
+        where: eq(projectsTbl.workspaceId, "workspace-1") as never,
+      }),
+    ).toThrow("Unsupported RQBv2 relational where");
+
+    const scopedCustomDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [
+        defineScopedTable(projectsTbl, {
+          queryName: "projects",
+          where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+        }),
+      ],
+    });
+
+    expect(() => scopedCustomDb.query.projects.findMany({ where: { id: "project-1" } })).toThrow(
+      "does not declare a relational object-filter scope",
+    );
   });
 });

@@ -10,7 +10,7 @@ import {
 import type { ScopedTableRule } from "../types.js";
 import type { NormalizedCreateScopedDbOptions } from "./options.js";
 
-/** Validate required user-supplied where shape for a scoped table. */
+/** Validate required user-supplied SQL where shape for a scoped table. */
 export function assertWhereAllowed<TScope>(
   condition: SQL | undefined,
   rule: ScopedTableRule<TScope> | undefined,
@@ -84,7 +84,7 @@ export function createMissingWhereError<TScope>(
 }
 
 /** Create the configured missing-scope error. */
-function createMissingScopeError<TScope>(
+export function createMissingScopeError<TScope>(
   tableName: string,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): Error {
