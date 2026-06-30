@@ -16,7 +16,9 @@
 - `src/drizzle-compat.ts` — Drizzle SQL chunk inspection helpers used by strict validation.
 - `tests/unit/` — fake-builder Vitest suites grouped by behavior: select guardrails, mutation guardrails, relational wrappers, API surface, custom rules/errors, and Drizzle compatibility helpers.
 - `tests/integration/` — real-driver integration suites for Postgres/PGlite and SQLite.
-- `README.md` — OSS-facing package documentation.
+- `README.md` — OSS-facing getting-started and project overview.
+- `docs/guide.md` — deeper usage guide, security model, and RLS/dialect notes.
+- `docs/api.md` — public API reference.
 - `CHANGELOG.md` — user-visible change log.
 
 ## Working rules
