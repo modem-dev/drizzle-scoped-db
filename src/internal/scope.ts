@@ -10,7 +10,7 @@ import {
 import type { ScopedTableRule } from "../types.js";
 import type { NormalizedCreateScopedDbOptions } from "./options.js";
 
-/** Validate required user-supplied where shape for a scoped table. */
+/** Validate required user-supplied SQL where shape for a scoped table. */
 export function assertWhereAllowed<TScope>(
   condition: SQL | undefined,
   rule: ScopedTableRule<TScope> | undefined,
@@ -25,6 +25,21 @@ export function assertWhereAllowed<TScope>(
   }
 
   if (isStrictMode(options) && !rule.hasScopeInWhere?.(condition)) {
+    throw createMissingScopeError(getRuleTableName(rule), options);
+  }
+}
+
+/** Validate required user-supplied RQBv2 object-filter where shape for a scoped table. */
+export function assertRelationalWhereAllowed<TScope>(
+  condition: unknown,
+  rule: ScopedTableRule<TScope>,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): void {
+  if (!condition && isStrictMode(options)) {
+    throw createMissingWhereError(getRuleTableName(rule), options);
+  }
+
+  if (isStrictMode(options) && !rule.relational?.hasScopeInWhere?.(condition)) {
     throw createMissingScopeError(getRuleTableName(rule), options);
   }
 }
@@ -84,7 +99,7 @@ export function createMissingWhereError<TScope>(
 }
 
 /** Create the configured missing-scope error. */
-function createMissingScopeError<TScope>(
+export function createMissingScopeError<TScope>(
   tableName: string,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): Error {

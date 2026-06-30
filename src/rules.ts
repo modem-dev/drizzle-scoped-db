@@ -3,6 +3,8 @@ import { type Column, eq } from "drizzle-orm";
 import { containsColumnFilter } from "./drizzle-compat.js";
 import type { ScopedTable, ScopedTableRule, ScopeByColumnOptions } from "./types.js";
 
+const TABLE_COLUMNS = Symbol.for("drizzle:Columns");
+
 /** Create a scoping rule for the common case where one table column stores the scope value. */
 export function scopeByColumn<TScope, TTable extends ScopedTable>(
   table: TTable,
@@ -10,6 +12,7 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
   options: ScopeByColumnOptions<TScope> = {},
 ): ScopedTableRule<TScope, TTable> {
   const columnName = options.columnName ?? getColumnName(column);
+  const columnKey = getColumnKey(table, column, columnName);
   const equals = options.equals ?? Object.is;
   const updateKey = options.updateKey ?? options.insertKey;
 
@@ -32,6 +35,12 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
       : undefined,
     hasScopeInConflictTarget: (target) => conflictTargetContainsColumn(target, column, columnName),
     hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName, table),
+    relational: columnKey
+      ? {
+          where: (scopeValue) => ({ [columnKey]: scopeValue }),
+          hasScopeInWhere: (condition) => containsRelationalColumnFilter(condition, columnKey),
+        }
+      : undefined,
   };
 }
 
@@ -74,4 +83,49 @@ function hasColumnName(candidate: unknown, columnName: string): boolean {
     "name" in candidate &&
     (candidate as { name?: unknown }).name === columnName
   );
+}
+
+/** Resolve the TypeScript property key RQBv2 object filters use for this column. */
+function getColumnKey(table: object, column: Column, columnName: string): string | undefined {
+  const columns = (table as Record<symbol, unknown>)[TABLE_COLUMNS];
+  if (!isColumnMap(columns)) {
+    return undefined;
+  }
+
+  for (const [key, candidate] of Object.entries(columns)) {
+    if (candidate === column || hasColumnName(candidate, columnName)) {
+      return key;
+    }
+  }
+
+  return undefined;
+}
+
+function isColumnMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** Check RQBv2 object filters for the scope column at the current table level or logical nesting. */
+function containsRelationalColumnFilter(condition: unknown, columnKey: string): boolean {
+  if (!isColumnMap(condition)) {
+    return false;
+  }
+
+  if (Object.hasOwn(condition, columnKey) && condition[columnKey] !== undefined) {
+    return true;
+  }
+
+  return (
+    containsLogicalRelationalFilter(condition.AND, columnKey) ||
+    containsLogicalRelationalFilter(condition.OR, columnKey) ||
+    containsLogicalRelationalFilter(condition.NOT, columnKey)
+  );
+}
+
+function containsLogicalRelationalFilter(value: unknown, columnKey: string): boolean {
+  if (Array.isArray(value)) {
+    return value.some((item) => containsRelationalColumnFilter(item, columnKey));
+  }
+
+  return containsRelationalColumnFilter(value, columnKey);
 }

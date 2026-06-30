@@ -10,6 +10,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Fixed
 
+- Add Drizzle 1.0 RQBv2 relational object-filter scoping for `scopeByColumn` rules, including fail-closed handling for unsupported relational where shapes and custom rules without RQBv2 object-filter support.
+
 ## [0.10.1] - 2026-06-30
 
 ### Fixed

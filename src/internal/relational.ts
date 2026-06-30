@@ -1,12 +1,9 @@
-import type { RelationalWhere, RelationalWhereCallback, ScopedTableRule } from "../types.js";
+import type { ScopedTableRule } from "../types.js";
 import type { NormalizedCreateScopedDbOptions } from "./options.js";
-import {
-  assertWhereAllowed,
-  createMissingWhereError,
-  getRuleTableName,
-  isStrictMode,
-  scopeCondition,
-} from "./scope.js";
+import { createScopedRqbV1TableQuery } from "./relational-v1.js";
+import { createScopedRqbV2TableQuery } from "./relational-v2.js";
+
+const ENTITY_KIND = Symbol.for("drizzle:entityKind");
 
 /** Wrap findFirst/findMany for Drizzle's relational query API. */
 export function createScopedTableQuery<
@@ -17,43 +14,14 @@ export function createScopedTableQuery<
   rule: ScopedTableRule<TScope>,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): TTableQuery {
-  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle relational method config types are table-specific.
-  const callFindFirst = (config?: any) => (tableQuery.findFirst as any).call(tableQuery, config);
-  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle relational method config types are table-specific.
-  const callFindMany = (config?: any) => (tableQuery.findMany as any).call(tableQuery, config);
-
-  return {
-    findFirst: wrapRelationalMethod(callFindFirst, rule, options),
-    findMany: wrapRelationalMethod(callFindMany, rule, options),
-  } as TTableQuery;
+  return isRqbV2TableQuery(tableQuery)
+    ? createScopedRqbV2TableQuery(tableQuery, rule, options)
+    : createScopedRqbV1TableQuery(tableQuery, rule, options);
 }
 
-/** Wrap a relational query method to validate and inject scoped predicates. */
-function wrapRelationalMethod<TScope, TResult>(
-  originalMethod: (config?: {
-    where?: RelationalWhere<unknown>;
-    [key: string]: unknown;
-  }) => Promise<TResult>,
-  rule: ScopedTableRule<TScope>,
-  options: NormalizedCreateScopedDbOptions<TScope>,
-): (config?: { where?: RelationalWhere<unknown>; [key: string]: unknown }) => Promise<TResult> {
-  return (config) => {
-    const originalWhere = config?.where;
-
-    if (originalWhere === undefined && isStrictMode(options)) {
-      throw createMissingWhereError(getRuleTableName(rule), options);
-    }
-
-    const wrappedWhere: RelationalWhereCallback<unknown> = (table, operators) => {
-      const userCondition =
-        typeof originalWhere === "function" ? originalWhere(table, operators) : originalWhere;
-      assertWhereAllowed(userCondition, rule, options);
-      return scopeCondition(userCondition, rule, options);
-    };
-
-    return originalMethod({
-      ...config,
-      where: wrappedWhere,
-    });
-  };
+/** Drizzle 1.0 relational builders advertise RQBv2 in their entity kind. */
+function isRqbV2TableQuery(tableQuery: object): boolean {
+  const constructor = tableQuery.constructor as unknown as Record<symbol, unknown> | undefined;
+  const entityKind = constructor?.[ENTITY_KIND];
+  return typeof entityKind === "string" && entityKind.endsWith("V2");
 }

@@ -61,6 +61,16 @@ export type PgRelationalDb = PgIntegrationDb & {
   };
 };
 
+export type PgRqbV2RelationalDb = PgIntegrationDb & {
+  query: {
+    projectsTbl: {
+      findMany(config?: {
+        where?: Record<string, unknown>;
+      }): Promise<Array<typeof pgProjects.$inferSelect>>;
+    };
+  };
+};
+
 export async function createPgRelationalDb(): Promise<PgRelationalDb> {
   const client = new PGlite();
   // Cast through the bare drizzle signature: the typed schema overload differs across Drizzle
@@ -75,6 +85,27 @@ export async function createPgRelationalDb(): Promise<PgRelationalDb> {
   await db.execute(sql.raw(PROJECTS_DDL));
 
   return db as unknown as PgRelationalDb;
+}
+
+export async function createPgRqbV2RelationalDb(): Promise<PgRqbV2RelationalDb> {
+  const relationsModule = (await import("drizzle-orm/relations")) as Record<string, unknown>;
+  const defineRelations = relationsModule.defineRelations as
+    | ((schema: typeof pgRelationalSchema, relations: () => Record<string, never>) => unknown)
+    | undefined;
+  if (!defineRelations) {
+    throw new Error("Drizzle RQBv2 defineRelations is not available.");
+  }
+
+  const client = new PGlite();
+  const makeDb = drizzle as unknown as (config: {
+    client: PGlite;
+    relations: unknown;
+  }) => PgIntegrationDb;
+  const db = makeDb({ client, relations: defineRelations(pgRelationalSchema, () => ({})) });
+
+  await db.execute(sql.raw(PROJECTS_DDL));
+
+  return db as unknown as PgRqbV2RelationalDb;
 }
 
 export async function seedPgProjects(db: Pick<PgIntegrationDb, "insert">): Promise<void> {

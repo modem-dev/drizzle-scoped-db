@@ -5,12 +5,14 @@ import {
   createScopedDb,
   InvalidScopedInsertError,
   MissingScopedPredicateError,
+  MissingScopedWhereError,
   scopeByColumn,
 } from "../../src/index";
 import {
   closePgIntegrationDb,
   createPgIntegrationDb,
   createPgRelationalDb,
+  createPgRqbV2RelationalDb,
   pgProjects,
   seedPgProjects,
   type PgIntegrationDb,
@@ -120,6 +122,48 @@ describe("Postgres/PGlite integration", () => {
             where: (project, { eq: eqOp }) => eqOp(project.id, "project-1"),
           }),
         ).rejects.toThrow(MissingScopedPredicateError);
+      } finally {
+        await closePgIntegrationDb(db);
+      }
+    },
+  );
+
+  const supportsRqbV2RelationalQuery = "defineRelations" in (drizzleOrm as Record<string, unknown>);
+
+  it.skipIf(!supportsRqbV2RelationalQuery)(
+    "scopes strict RQBv2 relational object filters against the real PGlite driver",
+    async () => {
+      const db = await createPgRqbV2RelationalDb();
+      try {
+        await seedPgProjects(db);
+        const scopedDb = createScopedDb(db, {
+          scopeName: "workspace",
+          scopeValue: "workspace-1",
+          strict: true,
+          rules: [
+            scopeByColumn(pgProjects, pgProjects.workspaceId, {
+              insertKey: "workspaceId",
+              queryName: "projectsTbl",
+            }),
+          ],
+        });
+
+        expect(() => scopedDb.query.projectsTbl.findMany()).toThrow(MissingScopedWhereError);
+        expect(() => scopedDb.query.projectsTbl.findMany({ where: { id: "project-1" } })).toThrow(
+          MissingScopedPredicateError,
+        );
+
+        const rows = await scopedDb.query.projectsTbl.findMany({
+          where: { workspaceId: "workspace-1" },
+        });
+        expect(rows).toEqual([
+          expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
+        ]);
+
+        const crossScopeRows = await scopedDb.query.projectsTbl.findMany({
+          where: { workspaceId: "workspace-2" },
+        });
+        expect(crossScopeRows).toEqual([]);
       } finally {
         await closePgIntegrationDb(db);
       }
