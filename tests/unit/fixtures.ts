@@ -15,7 +15,7 @@ export {
   MissingScopedWhereError,
   scopeByColumn,
   type ScopedDb,
-} from "../index";
+} from "../../src/index";
 
 export const projectsTbl = pgTable("projects", {
   id: text("id").primaryKey(),
