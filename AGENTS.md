@@ -14,7 +14,7 @@
 - `src/internal/scope.ts` — strict validation, scope predicate composition, and error factories.
 - `src/internal/options.ts` — option normalization and scoped table rule lookup.
 - `src/drizzle-compat.ts` — Drizzle SQL chunk inspection helpers used by strict validation.
-- `src/scoped-db.test.ts` — Vitest coverage for query wrapping, strict validation, transactions, upserts, escape boundaries, aliases, and helpers.
+- `src/__tests__/` — Vitest suites grouped by behavior: select guardrails, mutation guardrails, relational wrappers, API surface, custom rules/errors, and Drizzle compatibility helpers.
 - `README.md` — OSS-facing package documentation.
 - `CHANGELOG.md` — user-visible change log.
 
