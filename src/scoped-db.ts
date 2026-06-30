@@ -6,6 +6,7 @@ import {
 } from "./internal/mutations.js";
 import {
   type DrizzleLikeDb,
+  getRuleForTable,
   type NormalizedCreateScopedDbOptions,
   normalizeOptions,
 } from "./internal/options.js";
@@ -104,17 +105,17 @@ function createScopedDbInternal<
     },
 
     insert<TTable extends ScopedTable>(table: TTable) {
-      const rule = options.rulesByTable.get(table);
+      const rule = getRuleForTable(table, options);
       return rule ? createScopedInsertBuilder(db, table, rule, options) : dbRecord.insert(table);
     },
 
     update<TTable extends ScopedTable>(table: TTable) {
-      const rule = options.rulesByTable.get(table);
+      const rule = getRuleForTable(table, options);
       return rule ? createScopedUpdateBuilder(db, table, rule, options) : dbRecord.update(table);
     },
 
     delete<TTable extends ScopedTable>(table: TTable) {
-      const rule = options.rulesByTable.get(table);
+      const rule = getRuleForTable(table, options);
       return rule ? createScopedDeleteBuilder(db, table, rule, options) : dbRecord.delete(table);
     },
 
@@ -127,8 +128,6 @@ function createScopedDbInternal<
     ): Promise<T> {
       return dbRecord.transaction(async (tx: TDb) => callback(createScopedDbInternal(tx, options)));
     },
-
-    execute: typeof dbRecord.execute === "function" ? dbRecord.execute.bind(db) : undefined,
   };
 
   if (typeof dbRecord.selectDistinctOn === "function") {

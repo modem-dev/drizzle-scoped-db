@@ -24,8 +24,12 @@ export type DrizzleLikeDb = {
 /** Normalized options with defaults applied once per wrapper tree. */
 type RuleIndexes<TScope> = {
   rulesByTable: WeakMap<object, ScopedTableRule<TScope>>;
+  rulesByOriginalTableName: Map<string, ScopedTableRule<TScope>>;
   rulesByQueryName: Map<string, ScopedTableRule<TScope>>;
 };
+
+const ORIGINAL_TABLE_NAME = Symbol.for("drizzle:OriginalName");
+const IS_ALIAS = Symbol.for("drizzle:IsAlias");
 
 export type NormalizedCreateScopedDbOptions<
   TScope,
@@ -88,16 +92,54 @@ function getRuleIndexes<TScope>(rules: ScopedTableRule<TScope>[]): RuleIndexes<T
   }
 
   const rulesByTable = new WeakMap<object, ScopedTableRule<TScope>>();
+  const rulesByOriginalTableName = new Map<string, ScopedTableRule<TScope>>();
   const rulesByQueryName = new Map<string, ScopedTableRule<TScope>>();
 
   for (const rule of rules) {
     rulesByTable.set(rule.table, rule);
+    const originalTableName = getOriginalTableName(rule.table);
+    if (originalTableName) {
+      rulesByOriginalTableName.set(originalTableName, rule);
+    }
     if (rule.queryName) {
       rulesByQueryName.set(rule.queryName, rule);
     }
   }
 
-  const ruleIndexes = { rulesByTable, rulesByQueryName };
+  const ruleIndexes = { rulesByTable, rulesByOriginalTableName, rulesByQueryName };
   ruleIndexCache.set(cacheKey, ruleIndexes as RuleIndexes<unknown>);
   return ruleIndexes;
+}
+
+/** Look up exact table rules and fail closed for aliases of scoped tables. */
+export function getRuleForTable<TScope>(
+  table: object,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): ScopedTableRule<TScope> | undefined {
+  const exactRule = options.rulesByTable.get(table);
+  if (exactRule) {
+    return exactRule;
+  }
+
+  const originalTableName = getOriginalTableName(table);
+  if (
+    isAlias(table) &&
+    originalTableName &&
+    options.rulesByOriginalTableName.has(originalTableName)
+  ) {
+    throw new Error(
+      `Aliased scoped table "${originalTableName}" is not supported unless the alias has its own explicit scoped rule.`,
+    );
+  }
+
+  return undefined;
+}
+
+function getOriginalTableName(table: object): string | undefined {
+  const originalTableName = (table as Record<symbol, unknown>)[ORIGINAL_TABLE_NAME];
+  return typeof originalTableName === "string" ? originalTableName : undefined;
+}
+
+function isAlias(table: object): boolean {
+  return (table as Record<symbol, unknown>)[IS_ALIAS] === true;
 }

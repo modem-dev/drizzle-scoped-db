@@ -84,10 +84,23 @@ type FakeSelectBuilder = {
 // Postgres/SQLite-shaped insert result: RETURNING plus chainable conflict resolution.
 type FakeInsertResult = {
   values: unknown;
-  returning(): unknown;
+  returning(): FakeInsertResult;
+  $dynamic(): FakeInsertResult;
   onConflictDoNothing(): FakeInsertResult;
   onConflictDoUpdate(config: unknown): FakeInsertResult;
   onDuplicateKeyUpdate(config: unknown): FakeInsertResult;
+};
+
+type FakeMutationResult = {
+  condition: SQL | undefined;
+  values?: Record<string, unknown>;
+  where(condition: SQL | undefined): FakeMutationResult;
+  returning(): FakeMutationResult;
+  $dynamic(): FakeMutationResult;
+  then<TResult1 = unknown, TResult2 = never>(
+    onfulfilled?: ((value: unknown) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2>;
 };
 
 type FakeDb = {
@@ -116,15 +129,11 @@ type FakeDb = {
   };
   update(table: unknown): {
     set(values: Record<string, unknown>): {
-      where(condition: SQL | undefined): {
-        condition: SQL | undefined;
-        values: Record<string, unknown>;
-        returning(): unknown;
-      };
+      where(condition: SQL | undefined): FakeMutationResult;
     };
   };
   delete(table: unknown): {
-    where(condition: SQL | undefined): { condition: SQL | undefined; returning(): unknown };
+    where(condition: SQL | undefined): FakeMutationResult;
   };
   transaction<T>(callback: (tx: FakeDb) => Promise<T>): Promise<T>;
   execute(): undefined;
@@ -173,7 +182,10 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
           const result: FakeInsertResult = {
             values,
             returning() {
-              return undefined;
+              return result;
+            },
+            $dynamic() {
+              return result;
             },
             onConflictDoNothing() {
               state.conflictDidNothing = true;
@@ -198,13 +210,13 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
           return {
             where(condition: SQL | undefined) {
               state.updateCondition = condition;
-              return {
+              return createFakeMutationResult(
                 condition,
-                values,
-                returning() {
-                  return undefined;
+                (next) => {
+                  state.updateCondition = next;
                 },
-              };
+                values,
+              );
             },
           };
         },
@@ -214,12 +226,9 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
       return {
         where(condition: SQL | undefined) {
           state.deleteCondition = condition;
-          return {
-            condition,
-            returning() {
-              return undefined;
-            },
-          };
+          return createFakeMutationResult(condition, (next) => {
+            state.deleteCondition = next;
+          });
         },
       };
     },
@@ -235,6 +244,40 @@ function createFakeDb(state: FakeDbState = {}): FakeDb {
   };
 
   return db;
+}
+
+function createFakeMutationResult(
+  condition: SQL | undefined,
+  updateCondition: (condition: SQL | undefined) => void,
+  values?: Record<string, unknown>,
+): FakeMutationResult {
+  const result: FakeMutationResult = {
+    condition,
+    values,
+    where(nextCondition: SQL | undefined) {
+      result.condition = nextCondition;
+      updateCondition(nextCondition);
+      return result;
+    },
+    returning() {
+      return result;
+    },
+    $dynamic() {
+      return result;
+    },
+    // oxlint-disable-next-line unicorn/no-thenable -- Drizzle mutation builders are thenable.
+    then(onfulfilled, onrejected) {
+      const awaited = {
+        condition: result.condition,
+        values,
+        where: result.where,
+        returning: result.returning,
+        $dynamic: result.$dynamic,
+      };
+      return Promise.resolve(awaited).then(onfulfilled, onrejected);
+    },
+  };
+  return result;
 }
 
 const relationalOperators = { and, eq, or };
@@ -490,6 +533,35 @@ describe("createScopedDb", () => {
     ).not.toThrow();
   });
 
+  it("enforces strict where validation on scoped update and delete", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    expect(() => scopedDb.update(projectsTbl).set({ name: "Updated" }).where(undefined)).toThrow(
+      MissingScopedWhereError,
+    );
+    expect(() =>
+      scopedDb.update(projectsTbl).set({ name: "Updated" }).where(eq(projectsTbl.id, "p1")),
+    ).toThrow(MissingScopedPredicateError);
+    expect(() => scopedDb.delete(projectsTbl).where(undefined)).toThrow(MissingScopedWhereError);
+    expect(() => scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "p1"))).toThrow(
+      MissingScopedPredicateError,
+    );
+
+    scopedDb
+      .update(projectsTbl)
+      .set({ name: "Updated" })
+      .where(eq(projectsTbl.workspaceId, "workspace-1"));
+    expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
+    scopedDb.delete(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1"));
+    expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
+  });
+
   it("wraps relational query methods when a rule declares the query property name", async () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
@@ -537,6 +609,9 @@ describe("createScopedDb", () => {
               ),
             validateInsert: (row, scope) =>
               row.workspaceId === scope.workspaceId && row.regionId === scope.regionId,
+            validateUpdate: (payload, scope) =>
+              (!payload.workspaceId || payload.workspaceId === scope.workspaceId) &&
+              (!payload.regionId || payload.regionId === scope.regionId),
           },
         ),
       ],
@@ -545,15 +620,28 @@ describe("createScopedDb", () => {
     scopedDb
       .insert(projectsTbl)
       .values({ id: "project-1", workspaceId: "workspace-1", regionId: "us", name: "Roadmap" });
-    scopedDb.update(projectsTbl).set({ name: "Updated" }).where(eq(projectsTbl.id, "project-1"));
-    scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "project-1"));
-
     expect(rawDb._state.insertValues).toEqual({
       id: "project-1",
       workspaceId: "workspace-1",
       regionId: "us",
       name: "Roadmap",
     });
+    scopedDb.update(projectsTbl).set({ name: "Updated" }).where(eq(projectsTbl.id, "project-1"));
+    scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "project-1"));
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-2", workspaceId: "workspace-1", regionId: "us", name: "Backlog" })
+      .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Backlog" } });
+    expect(() =>
+      scopedDb
+        .insert(projectsTbl)
+        .values({ id: "project-3", workspaceId: "workspace-1", regionId: "us", name: "Wrong" })
+        .onConflictDoUpdate({ target: projectsTbl.id, set: { regionId: "eu" } }),
+    ).toThrow(InvalidScopedUpdateError);
+
+    const conflictConfig = rawDb._state.conflictConfig as { setWhere?: SQL };
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id")).toBe(true);
+    expect(containsColumnFilter(conflictConfig.setWhere, "region_id")).toBe(true);
     expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
     expect(containsColumnFilter(rawDb._state.updateCondition, "region_id")).toBe(true);
     expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
@@ -578,6 +666,8 @@ describe("createScopedDb", () => {
     expect(scopedDb._workspaceId).toBe("workspace-1");
     expect(scopedDb.toJSON?.()).toEqual({ scopeValue: "workspace-1" });
     scopedDb.assertWorkspaceId("workspace-1");
+    expect((scopedDb as unknown as { execute?: unknown }).execute).toBeUndefined();
+    expect(scopedDb._raw.execute()).toBeUndefined();
 
     await scopedDb.transaction(async (tx) => {
       tx.insert(projectsTbl).values({
@@ -699,7 +789,8 @@ describe("createScopedDb", () => {
       await tx.query.projects.findFirst({
         where: (project, { eq }) => eq(project.id, "project-4"),
       });
-      tx.execute();
+      // @ts-expect-error Transaction-scoped wrappers do not expose raw execute().
+      void tx.execute;
       // @ts-expect-error Transaction-scoped builders stay narrowed too.
       void tx.select().from(projectsTbl).prepare;
     });
@@ -980,6 +1071,27 @@ describe("createScopedDb", () => {
     expect((scopedDb.query as Record<string, unknown>).incomplete).toBe(rawDb.query.incomplete);
   });
 
+  it("enforces strict where validation on relational queries", async () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    expect(() => scopedDb.query.projects.findMany()).toThrow(MissingScopedWhereError);
+    await expect(
+      scopedDb.query.projects.findMany({ where: eq(projectsTbl.id, "p1") }),
+    ).rejects.toThrow(MissingScopedPredicateError);
+    await expect(scopedDb.query.projects.findFirst({ where: () => undefined })).rejects.toThrow(
+      MissingScopedWhereError,
+    );
+
+    await scopedDb.query.projects.findMany({ where: eq(projectsTbl.workspaceId, "workspace-1") });
+    expect(containsColumnFilter(rawDb._state.relationalCondition, "workspace_id")).toBe(true);
+  });
+
   it("throws on explicit undefined where clauses when strict mode is enabled", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
@@ -1063,9 +1175,16 @@ describe("createScopedDb", () => {
       .set({ name: "Updated" })
       .where(eq(projectsTbl.id, "project-1")) as unknown as {
       where: (condition: SQL | undefined) => unknown;
+      $dynamic: () => unknown;
     };
 
     expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
+    expect(() => result.$dynamic()).toThrow();
+    expect(Object.getPrototypeOf(result)).toBeNull();
+    expect((result as { constructor?: unknown }).constructor).toBeUndefined();
+    expect((result as { valueOf?: unknown }).valueOf).toBeUndefined();
+    expect((result as { __defineGetter__?: unknown }).__defineGetter__).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(result, "where")).toBeUndefined();
     expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
   });
 
@@ -1085,14 +1204,43 @@ describe("createScopedDb", () => {
     expect(updateResult).toEqual({
       condition: rawDb._state.updateCondition,
       values: { name: "Updated" },
+      where: expect.any(Function),
       returning: expect.any(Function),
+      $dynamic: expect.any(Function),
     });
 
     const deleteResult = await scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "project-1"));
     expect(deleteResult).toEqual({
       condition: rawDb._state.deleteCondition,
+      where: expect.any(Function),
       returning: expect.any(Function),
+      $dynamic: expect.any(Function),
     });
+  });
+
+  it("keeps scoped update and delete results guarded after returning()", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const updateResult = scopedDb
+      .update(projectsTbl)
+      .set({ name: "Updated" })
+      .where(eq(projectsTbl.id, "project-1"))
+      .returning() as unknown as { where(condition: SQL | undefined): unknown };
+    expect(() => updateResult.where(eq(projectsTbl.id, "project-2"))).toThrow();
+    expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
+
+    const deleteResult = scopedDb
+      .delete(projectsTbl)
+      .where(eq(projectsTbl.id, "project-1"))
+      .returning() as unknown as { where(condition: SQL | undefined): unknown };
+    expect(() => deleteResult.where(eq(projectsTbl.id, "project-2"))).toThrow();
+    expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
   });
 
   it("prevents double .where() on scoped delete results", () => {
@@ -1108,9 +1256,16 @@ describe("createScopedDb", () => {
       .delete(projectsTbl)
       .where(eq(projectsTbl.id, "project-1")) as unknown as {
       where: (condition: SQL | undefined) => unknown;
+      $dynamic: () => unknown;
     };
 
     expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
+    expect(() => result.$dynamic()).toThrow();
+    expect(Object.getPrototypeOf(result)).toBeNull();
+    expect((result as { constructor?: unknown }).constructor).toBeUndefined();
+    expect((result as { valueOf?: unknown }).valueOf).toBeUndefined();
+    expect((result as { __defineGetter__?: unknown }).__defineGetter__).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(result, "where")).toBeUndefined();
     expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
   });
 
@@ -1152,6 +1307,17 @@ describe("createScopedDb", () => {
       { id: "project-3", workspaceId: "workspace-1", name: "Two" },
     ]);
 
+    expect(rawDb._state.insertValues).toEqual([
+      { id: "project-2", workspaceId: "workspace-1", name: "One" },
+      { id: "project-3", workspaceId: "workspace-1", name: "Two" },
+    ]);
+
+    expect(() =>
+      scopedDbWithInsertValidation.insert(projectsTbl).values([
+        { id: "project-4", workspaceId: "workspace-1", name: "Valid" },
+        { id: "project-5", workspaceId: "workspace-2", name: "Wrong" },
+      ]),
+    ).toThrow(InvalidScopedInsertError);
     expect(rawDb._state.insertValues).toEqual([
       { id: "project-2", workspaceId: "workspace-1", name: "One" },
       { id: "project-3", workspaceId: "workspace-1", name: "Two" },
@@ -1343,6 +1509,34 @@ describe("createScopedDb", () => {
     ).toThrow(InvalidScopedUpdateError);
   });
 
+  it("keeps scoped insert conflict guards after returning() and blocks unloud dynamic escape", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const returned = scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .returning() as unknown as {
+      onConflictDoUpdate(config: unknown): unknown;
+      $dynamic(): unknown;
+    };
+
+    expect(() =>
+      returned.onConflictDoUpdate({ target: projectsTbl.id, set: { workspaceId: "workspace-2" } }),
+    ).toThrow(InvalidScopedUpdateError);
+    expect(() => returned.$dynamic()).toThrow();
+    expect(Object.getPrototypeOf(returned)).toBeNull();
+    expect((returned as { constructor?: unknown }).constructor).toBeUndefined();
+    expect((returned as { valueOf?: unknown }).valueOf).toBeUndefined();
+    expect((returned as { __defineGetter__?: unknown }).__defineGetter__).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(returned, "onConflictDoUpdate")).toBeUndefined();
+    expect(rawDb._state.conflictConfig).toBeUndefined();
+  });
+
   it("exposes the raw insert builder via $unsafeUnscoped() only after scoped values validation runs", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
@@ -1365,6 +1559,11 @@ describe("createScopedDb", () => {
     const raw = scopedResult.$unsafeUnscoped();
     expect(typeof raw.onConflictDoUpdate).toBe("function");
     expect(raw.onConflictDoNothing()).toBe(raw);
+    raw.onConflictDoUpdate({ target: projectsTbl.id, set: { workspaceId: "workspace-2" } });
+    expect(rawDb._state.conflictConfig).toEqual({
+      target: projectsTbl.id,
+      set: { workspaceId: "workspace-2" },
+    });
     expect(rawDb._state.insertValues).toEqual({
       id: "project-1",
       workspaceId: "workspace-1",
@@ -1483,10 +1682,10 @@ describe("createScopedDb", () => {
       scopeName: "workspace",
       scopeValue: "workspace-1",
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
-    }) as typeof dbWithoutQueryOrExecute & { query: undefined; execute: undefined };
+    }) as typeof dbWithoutQueryOrExecute & { query: undefined };
 
     expect(scopedDb.query).toBeUndefined();
-    expect(scopedDb.execute).toBeUndefined();
+    expect((scopedDb as unknown as { execute?: unknown }).execute).toBeUndefined();
     expect(
       (scopedDb as typeof scopedDb & { selectDistinctOn?: unknown }).selectDistinctOn,
     ).toBeUndefined();
@@ -1545,26 +1744,41 @@ describe("createScopedDb", () => {
     expect(() =>
       scopedDb.select().from(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1")),
     ).not.toThrow();
+
+    const parent = aliasedTable(projectsTbl, "parent");
+    expect(() =>
+      scopedDb.select().from(projectsTbl).where(eq(parent.workspaceId, "workspace-1")),
+    ).toThrow(MissingScopedPredicateError);
   });
 
-  it("accepts aliased-table column references in strict mode (self-join)", () => {
+  it("rejects aliases of scoped tables unless the alias has its own explicit rule", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      strict: true,
+      strict: false,
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
     const parent = aliasedTable(projectsTbl, "parent");
 
-    // Filtering on the aliased table's column is a legitimate scope acknowledgment.
+    expect(() => scopedDb.select().from(parent).where(eq(parent.id, "p1"))).toThrow(
+      "Aliased scoped table",
+    );
     expect(() =>
-      scopedDb
-        .select()
-        .from(projectsTbl)
-        .leftJoin(parent, eq(parent.id, projectsTbl.regionId))
-        .where(and(eq(parent.workspaceId, "workspace-1"), eq(projectsTbl.id, "p1"))),
-    ).not.toThrow();
+      scopedDb.select().from(projectsTbl).leftJoin(parent, eq(parent.id, projectsTbl.regionId)),
+    ).toThrow("Aliased scoped table");
+
+    const rawDbWithAliasRule = createFakeDb();
+    const scopedDbWithAliasRule = createScopedDb(rawDbWithAliasRule, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(parent, parent.workspaceId)],
+    });
+    scopedDbWithAliasRule.select().from(parent).where(eq(parent.id, "p1"));
+    expect(
+      containsColumnFilter(rawDbWithAliasRule._state.selectCondition, "workspace_id", parent),
+    ).toBe(true);
   });
 
   it("containsColumnFilter disambiguates by table identity when a table is provided", () => {
@@ -1579,6 +1793,11 @@ describe("createScopedDb", () => {
     expect(containsColumnFilter(projectsCondition, "workspace_id", projectsTbl)).toBe(true);
     expect(containsColumnFilter(auditCondition, "workspace_id", projectsTbl)).toBe(false);
     expect(containsColumnFilter(auditCondition, "workspace_id", projectsAuditTbl)).toBe(true);
+
+    const parent = aliasedTable(projectsTbl, "parent");
+    const parentCondition = eq(parent.workspaceId, "workspace-1");
+    expect(containsColumnFilter(parentCondition, "workspace_id", parent)).toBe(true);
+    expect(containsColumnFilter(parentCondition, "workspace_id", projectsTbl)).toBe(false);
   });
 
   it("assertDrizzleCompatibility accepts an optional table for stricter checking", () => {
