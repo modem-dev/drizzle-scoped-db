@@ -1,0 +1,72 @@
+import { eq } from "drizzle-orm";
+
+import { getRuleForTable, normalizeOptions } from "../../src/internal/options";
+import type { ScopedTableRule } from "../../src/types";
+import { projectsTbl, scopeByColumn, type Column } from "./fixtures";
+
+describe("scope table rule helpers", () => {
+  it("detects scope columns in conflict targets by identity, arrays, and column names", () => {
+    const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId);
+
+    expect(rule.hasScopeInConflictTarget?.(projectsTbl.workspaceId)).toBe(true);
+    expect(rule.hasScopeInConflictTarget?.([projectsTbl.id, projectsTbl.workspaceId])).toBe(true);
+    expect(rule.hasScopeInConflictTarget?.({ name: "workspace_id" })).toBe(true);
+    expect(rule.hasScopeInConflictTarget?.({ name: "id" })).toBe(false);
+    expect(rule.hasScopeInConflictTarget?.({ columnName: "workspace_id" })).toBe(false);
+    expect(rule.hasScopeInConflictTarget?.(null)).toBe(false);
+    expect(rule.hasScopeInConflictTarget?.("workspace_id")).toBe(false);
+  });
+
+  it("requires an inferable column name unless columnName is provided", () => {
+    const malformedColumn = {} as Column;
+
+    expect(() => scopeByColumn(projectsTbl, malformedColumn)).toThrow(
+      "Unable to infer Drizzle column name. Pass `columnName` to scopeByColumn().",
+    );
+
+    const rule = scopeByColumn(projectsTbl, malformedColumn, { columnName: "workspace_id" });
+    expect(rule.hasScopeInConflictTarget?.({ name: "workspace_id" })).toBe(true);
+  });
+
+  it("delegates where predicate detection to the inferred column name", () => {
+    const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId);
+
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(true);
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.id, "project-1"))).toBe(false);
+  });
+});
+
+const originalTableNameSymbol = Symbol.for("drizzle:OriginalName");
+
+describe("scoped rule indexing", () => {
+  it("indexes rules for table objects without Drizzle original table names", () => {
+    const table = {} as ScopedTableRule<string>["table"];
+    const rule: ScopedTableRule<string> = {
+      table,
+      where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+    };
+
+    const options = normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [rule],
+    });
+
+    expect(getRuleForTable(table, options)).toBe(rule);
+  });
+
+  it("treats non-string Drizzle original table names as absent", () => {
+    const rule = {
+      table: projectsTbl,
+      where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+    } satisfies ScopedTableRule<string>;
+    const options = normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [rule],
+    });
+    const malformedTable = { [originalTableNameSymbol]: 123 };
+
+    expect(getRuleForTable(malformedTable, options)).toBeUndefined();
+  });
+});
