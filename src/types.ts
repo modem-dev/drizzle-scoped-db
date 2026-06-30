@@ -49,12 +49,15 @@ export type ScopedTableRule<
    * Required when `strict` mode is enabled; rules without a detector fail strict validation.
    */
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
-  /** Optional Drizzle 1.0 RQBv2 object-filter support for relational `db.query.*` wrappers. */
+  /** Optional support for Drizzle relational query APIs beyond SQL/callback predicates. */
   relational?: {
-    /** Object filter that is always injected into RQBv2 relational find queries. */
-    where: (scopeValue: TScope) => RelationalObjectWhere | undefined;
-    /** Strict-mode validator for checking whether a user RQBv2 object filter already includes scope. */
-    hasScopeInWhere?: (condition: unknown) => boolean;
+    /** Drizzle 1.0 RQBv2 object-filter support for relational `db.query.*` wrappers. */
+    rqbV2?: {
+      /** Object filter that is always injected into RQBv2 relational find queries. */
+      where: (scopeValue: TScope) => RelationalObjectWhere | undefined;
+      /** Strict-mode validator for checking whether a user RQBv2 object filter already includes scope. */
+      hasScopeInWhere?: (condition: unknown) => boolean;
+    };
   };
 };
 

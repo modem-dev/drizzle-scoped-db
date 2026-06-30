@@ -38,17 +38,19 @@ describe("scope table rule helpers", () => {
   it("adds RQBv2 object-filter helpers when the column key can be resolved", () => {
     const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId);
 
-    expect(rule.relational?.where("workspace-1")).toEqual({ workspaceId: "workspace-1" });
-    expect(rule.relational?.hasScopeInWhere?.({ workspaceId: "workspace-1" })).toBe(true);
-    expect(rule.relational?.hasScopeInWhere?.({ workspaceId: undefined })).toBe(false);
-    expect(rule.relational?.hasScopeInWhere?.({ id: "project-1" })).toBe(false);
-    expect(rule.relational?.hasScopeInWhere?.(undefined)).toBe(false);
+    expect(rule.relational?.rqbV2?.where("workspace-1")).toEqual({ workspaceId: "workspace-1" });
+    expect(rule.relational?.rqbV2?.hasScopeInWhere?.({ workspaceId: "workspace-1" })).toBe(true);
+    expect(rule.relational?.rqbV2?.hasScopeInWhere?.({ workspaceId: undefined })).toBe(false);
+    expect(rule.relational?.rqbV2?.hasScopeInWhere?.({ id: "project-1" })).toBe(false);
+    expect(rule.relational?.rqbV2?.hasScopeInWhere?.(undefined)).toBe(false);
     expect(
-      rule.relational?.hasScopeInWhere?.({
+      rule.relational?.rqbV2?.hasScopeInWhere?.({
         OR: [{ id: "project-1" }, { AND: [{ workspaceId: "workspace-1" }] }],
       }),
     ).toBe(true);
-    expect(rule.relational?.hasScopeInWhere?.({ NOT: { workspaceId: "workspace-2" } })).toBe(true);
+    expect(rule.relational?.rqbV2?.hasScopeInWhere?.({ NOT: { workspaceId: "workspace-2" } })).toBe(
+      true,
+    );
   });
 
   it("omits RQBv2 helpers when the column key cannot be resolved", () => {
@@ -56,13 +58,13 @@ describe("scope table rule helpers", () => {
     expect(
       scopeByColumn(tableWithoutColumns, { name: "workspace_id" } as Column, {
         columnName: "workspace_id",
-      }).relational,
+      }).relational?.rqbV2,
     ).toBeUndefined();
 
     expect(
       scopeByColumn(projectsTbl, { name: "missing_scope" } as Column, {
         columnName: "missing_scope",
-      }).relational,
+      }).relational?.rqbV2,
     ).toBeUndefined();
   });
 });

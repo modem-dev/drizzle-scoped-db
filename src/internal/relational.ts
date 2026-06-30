@@ -1,27 +1,25 @@
 import type { ScopedTableRule } from "../types.js";
 import type { NormalizedCreateScopedDbOptions } from "./options.js";
-import { createScopedRqbV1TableQuery } from "./relational-v1.js";
-import { createScopedRqbV2TableQuery } from "./relational-v2.js";
+import { type RelationalQueryAdapter, type RelationalTableQuery } from "./relational/adapter.js";
+import { RqbV1RelationalAdapter } from "./relational/rqb-v1-adapter.js";
+import { RqbV2RelationalAdapter } from "./relational/rqb-v2-adapter.js";
 
-const ENTITY_KIND = Symbol.for("drizzle:entityKind");
+const RELATIONAL_ADAPTERS: RelationalQueryAdapter[] = [
+  new RqbV2RelationalAdapter(),
+  new RqbV1RelationalAdapter(),
+];
 
 /** Wrap findFirst/findMany for Drizzle's relational query API. */
-export function createScopedTableQuery<
-  TScope,
-  TTableQuery extends { findFirst: unknown; findMany: unknown },
->(
+export function createScopedTableQuery<TScope, TTableQuery extends RelationalTableQuery>(
   tableQuery: TTableQuery,
   rule: ScopedTableRule<TScope>,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): TTableQuery {
-  return isRqbV2TableQuery(tableQuery)
-    ? createScopedRqbV2TableQuery(tableQuery, rule, options)
-    : createScopedRqbV1TableQuery(tableQuery, rule, options);
+  return getRelationalAdapter(tableQuery).wrap(tableQuery, rule, options);
 }
 
-/** Drizzle 1.0 relational builders advertise RQBv2 in their entity kind. */
-function isRqbV2TableQuery(tableQuery: object): boolean {
-  const constructor = tableQuery.constructor as unknown as Record<symbol, unknown> | undefined;
-  const entityKind = constructor?.[ENTITY_KIND];
-  return typeof entityKind === "string" && entityKind.endsWith("V2");
+function getRelationalAdapter(tableQuery: object): RelationalQueryAdapter {
+  return RELATIONAL_ADAPTERS.find((candidate) =>
+    candidate.supports(tableQuery),
+  ) as RelationalQueryAdapter;
 }

@@ -39,7 +39,7 @@ export function assertRelationalWhereAllowed<TScope>(
     throw createMissingWhereError(getRuleTableName(rule), options);
   }
 
-  if (isStrictMode(options) && !rule.relational?.hasScopeInWhere?.(condition)) {
+  if (isStrictMode(options) && !rule.relational?.rqbV2?.hasScopeInWhere?.(condition)) {
     throw createMissingScopeError(getRuleTableName(rule), options);
   }
 }
