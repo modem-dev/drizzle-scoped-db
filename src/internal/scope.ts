@@ -29,21 +29,6 @@ export function assertWhereAllowed<TScope>(
   }
 }
 
-/** Validate required user-supplied RQBv2 object-filter where shape for a scoped table. */
-export function assertRelationalWhereAllowed<TScope>(
-  condition: unknown,
-  rule: ScopedTableRule<TScope>,
-  options: NormalizedCreateScopedDbOptions<TScope>,
-): void {
-  if (!condition && isStrictMode(options)) {
-    throw createMissingWhereError(getRuleTableName(rule), options);
-  }
-
-  if (isStrictMode(options) && !rule.relational?.rqbV2?.hasScopeInWhere?.(condition)) {
-    throw createMissingScopeError(getRuleTableName(rule), options);
-  }
-}
-
 /** Strict mode is enabled by default; callers must explicitly opt out. */
 export function isStrictMode<TScope>(options: NormalizedCreateScopedDbOptions<TScope>): boolean {
   return options.strict !== false;

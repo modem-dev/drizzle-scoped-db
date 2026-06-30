@@ -1,6 +1,11 @@
 import type { RelationalObjectWhere, ScopedTableRule } from "../../types.js";
 import type { NormalizedCreateScopedDbOptions } from "../options.js";
-import { assertRelationalWhereAllowed, getRuleTableName } from "../scope.js";
+import {
+  createMissingScopeError,
+  createMissingWhereError,
+  getRuleTableName,
+  isStrictMode,
+} from "../scope.js";
 import {
   bindRelationalMethod,
   type RelationalMethod,
@@ -42,7 +47,7 @@ export class RqbV2RelationalAdapter implements RelationalQueryAdapter {
       const originalWhere = config?.where;
 
       this.assertSupportedWhere(originalWhere, rule, options);
-      assertRelationalWhereAllowed(originalWhere, rule, options);
+      this.assertWhereAllowed(originalWhere, rule, options);
 
       const scopedWhere = rule.relational?.rqbV2?.where(options.scopeValue);
       if (!scopedWhere) {
@@ -54,6 +59,21 @@ export class RqbV2RelationalAdapter implements RelationalQueryAdapter {
         where: this.mergeWhere(originalWhere, scopedWhere),
       });
     };
+  }
+
+  /** Validate that the user-supplied object filter satisfies strict scoped-query rules. */
+  private assertWhereAllowed<TScope>(
+    where: RelationalObjectWhere | undefined,
+    rule: ScopedTableRule<TScope>,
+    options: NormalizedCreateScopedDbOptions<TScope>,
+  ): void {
+    if (!where && isStrictMode(options)) {
+      throw createMissingWhereError(getRuleTableName(rule), options);
+    }
+
+    if (isStrictMode(options) && !rule.relational?.rqbV2?.hasScopeInWhere?.(where)) {
+      throw createMissingScopeError(getRuleTableName(rule), options);
+    }
   }
 
   /** Compose a user object-filter with the mandatory scope filter in RQBv2's own language. */
