@@ -10,6 +10,12 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Fixed
 
+## [0.10.1] - 2026-06-30
+
+### Fixed
+
+- Restore strict relational `db.query.*` where-callback scope detection when schema keys differ from SQL table names, preventing false missing-scope errors for correctly scoped queries.
+
 ## [0.10.0] - 2026-06-30
 
 ### Added
