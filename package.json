@@ -40,7 +40,8 @@
   "scripts": {
     "bench:release": "pnpm build && node --expose-gc benchmarks/run-release.mjs",
     "bench:release:compare": "node scripts/compare-release-benchmarks.mjs",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm clean && tsc -p tsconfig.build.json",
+    "clean": "node scripts/clean-build.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
     "coverage": "vitest run --typecheck --coverage",
     "format": "oxfmt --write .",
