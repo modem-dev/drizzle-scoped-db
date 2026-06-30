@@ -6,8 +6,15 @@
 
 ## Important files
 
-- `src/index.ts` — public API and implementation.
-- `src/scoped-db.test.ts` — Vitest coverage for query wrapping, strict validation, transactions, and helpers.
+- `src/index.ts` — public exports.
+- `src/scoped-db.ts` — root scoped DB wrapper and transaction wrapping.
+- `src/internal/select.ts` — scoped select/join facades.
+- `src/internal/mutations.ts` — scoped insert/update/delete facades, upsert guarding, and mutation-result escape prevention.
+- `src/internal/relational.ts` — scoped Drizzle relational query wrappers.
+- `src/internal/scope.ts` — strict validation, scope predicate composition, and error factories.
+- `src/internal/options.ts` — option normalization and scoped table rule lookup.
+- `src/drizzle-compat.ts` — Drizzle SQL chunk inspection helpers used by strict validation.
+- `src/scoped-db.test.ts` — Vitest coverage for query wrapping, strict validation, transactions, upserts, escape boundaries, aliases, and helpers.
 - `README.md` — OSS-facing package documentation.
 - `CHANGELOG.md` — user-visible change log.
 
@@ -15,9 +22,12 @@
 
 - Keep the public API small and stable.
 - Preserve dialect-generic Drizzle core types where possible.
-- Treat `_unsafeUnscopedDb` as an intentionally loud escape hatch.
+- Treat `_unsafeUnscopedDb` and `.$unsafeUnscoped()` as the intentionally loud raw escapes.
+- Do not expose unloud raw Drizzle builder escape paths from scoped facades; be especially careful with fluent methods like `.where(...)`, `.returning(...)`, `$dynamic()`, and conflict/upsert methods.
+- Fail closed for ambiguous scoped table aliases unless the alias has its own explicit scoped rule.
+- Keep scoped upserts safe by deriving guards from `rule.where(scopeValue)` and injecting them into `setWhere`; do not require conflict targets to include the scope column.
 - Do not add application-internal dependencies to this standalone package.
-- Prefer behavior-focused tests over implementation-only assertions.
+- Prefer behavior-focused tests over implementation-only assertions, especially security regression tests for scope bypasses and escape boundaries.
 
 ## Validation
 
@@ -31,6 +41,15 @@ pnpm test
 pnpm coverage
 pnpm build
 ```
+
+For changes that add proxies, wrappers, hot-path query guards, or other performance-sensitive behavior, also run the release benchmarks and compare against the latest committed baseline:
+
+```bash
+pnpm bench:release
+pnpm bench:release:compare
+```
+
+For unreleased branch checks that should not write a versioned snapshot, run `node --expose-gc benchmarks/run-release.mjs --version <next-version> --out /tmp/drizzle-scoped-db-head-bench.json` and compare with `scripts/compare-release-benchmarks.mjs --base benchmarks/release/<baseline>.json --head /tmp/drizzle-scoped-db-head-bench.json`.
 
 ## Changelog
 
