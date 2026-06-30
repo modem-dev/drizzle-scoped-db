@@ -547,4 +547,79 @@ describe("createScopedDb mutation guardrails", () => {
         .$unsafeUnscoped(),
     ).toThrow(InvalidScopedInsertError);
   });
+
+  it("combines legacy upsert where and setWhere before adding the scope guard", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+    const legacyWhere = eq(projectsTbl.regionId, "region-1");
+    const setWhere = eq(projectsTbl.name, "Draft");
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", name: "Roadmap" })
+      .onConflictDoUpdate({
+        target: projectsTbl.id,
+        set: { name: "Updated" },
+        where: legacyWhere,
+        setWhere,
+      });
+
+    const conflictConfig = rawDb._state.conflictConfig as { where?: SQL; setWhere?: SQL };
+    expect("where" in conflictConfig).toBe(false);
+    expect(conflictConfig.setWhere).toBeDefined();
+    expect(containsColumnFilter(conflictConfig.setWhere, "region_id", projectsTbl)).toBe(true);
+    expect(containsColumnFilter(conflictConfig.setWhere, "name", projectsTbl)).toBe(true);
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
+  });
+
+  it("allows scoped updates without update validation when no update validator is declared", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const result = scopedDb
+      .update(projectsTbl)
+      .set({ workspaceId: "workspace-2" })
+      .where(eq(projectsTbl.id, "project-1"));
+
+    expect((result as unknown as { condition: SQL | undefined }).condition).toBe(
+      rawDb._state.updateCondition,
+    );
+    expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id", projectsTbl)).toBe(
+      true,
+    );
+  });
+
+  it("returns non-object raw mutation results without proxy wrapping", () => {
+    const rawDb = {
+      ...createFakeDb(),
+      update() {
+        return {
+          set() {
+            return {
+              where() {
+                return "updated";
+              },
+            };
+          },
+        };
+      },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    expect(scopedDb.update(projectsTbl).set({ name: "Updated" }).where(undefined)).toBe("updated");
+  });
 });
