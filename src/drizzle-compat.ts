@@ -1,7 +1,4 @@
-import type { SQL, Table } from "drizzle-orm";
-
-/** Drizzle symbol storing the original (pre-alias) table name. */
-const ORIGINAL_TABLE_NAME = Symbol.for("drizzle:OriginalName");
+import { getTableName, type SQL, type Table } from "drizzle-orm";
 
 /** Checks whether a Drizzle SQL condition references the given column on the given table. */
 export function containsColumnFilter(
@@ -18,7 +15,7 @@ export function containsColumnFilter(
     return false;
   }
 
-  const expectedTableKey = table ? getOriginalTableName(table) : undefined;
+  const expectedTableKey = table ? getTableKey(table) : undefined;
   return searchForColumnInChunks(sqlWithChunks.queryChunks, columnName, expectedTableKey);
 }
 
@@ -71,16 +68,16 @@ function searchForColumnInChunks(
   return false;
 }
 
-/** Alias-safe identity check: matches the column's table by original name, not reference. */
+/** Alias-safe identity check: matches the column's actual query table name, including aliases. */
 function isColumnOnTable(chunk: object, expectedTableKey?: string): boolean {
   if (!expectedTableKey) {
     return true;
   }
   const chunkTable = (chunk as { table?: Table | undefined }).table;
-  return chunkTable !== undefined && getOriginalTableName(chunkTable) === expectedTableKey;
+  return chunkTable !== undefined && getTableKey(chunkTable) === expectedTableKey;
 }
 
-/** Resolve the stable pre-alias table name from Drizzle's OriginalName symbol. */
-function getOriginalTableName(table: Table): string {
-  return (table as unknown as Record<symbol, unknown>)[ORIGINAL_TABLE_NAME] as string;
+/** Resolve the table key Drizzle will use in this query (alias name for aliases). */
+function getTableKey(table: Table): string {
+  return getTableName(table);
 }

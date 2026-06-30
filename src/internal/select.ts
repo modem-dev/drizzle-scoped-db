@@ -8,7 +8,7 @@ import type {
   ScopedTableRule,
   ScopedWhereBuilder,
 } from "../types.js";
-import type { NormalizedCreateScopedDbOptions } from "./options.js";
+import { getRuleForTable, type NormalizedCreateScopedDbOptions } from "./options.js";
 import { assertWhereAllowed, scopeCondition, scopeJoinCondition } from "./scope.js";
 
 /** Build a scoped select/selectDistinct/selectDistinctOn facade. */
@@ -26,8 +26,8 @@ export function createScopedSelectBuilder<TScope, TSelection>(
         ? NonNullable<TTable["$inferSelect"]>[]
         : InferSelection<TSelection>[]
     > {
+      const rule = getRuleForTable(table, options);
       const fromBuilder = selectBuilder.from(table);
-      const rule = options.rulesByTable.get(table);
 
       // oxlint-disable-next-line typescript/no-explicit-any -- Return type depends on selection and table inference.
       return createScopedFromBuilder(fromBuilder, rule, options) as any;
@@ -54,7 +54,7 @@ function createScopedFromBuilder<
     },
 
     leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
-      const joinRule = options.rulesByTable.get(joinTable);
+      const joinRule = getRuleForTable(joinTable, options);
       return createScopedFromBuilder(
         builder.leftJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
         rootRule,
@@ -63,7 +63,7 @@ function createScopedFromBuilder<
     },
 
     innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
-      const joinRule = options.rulesByTable.get(joinTable);
+      const joinRule = getRuleForTable(joinTable, options);
       return createScopedFromBuilder(
         builder.innerJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
         rootRule,

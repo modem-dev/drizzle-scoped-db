@@ -366,8 +366,6 @@ export type ScopedDb<
   ): Promise<T>;
   /** The raw relational query API, with scoped wrappers on protected tables. */
   query: TDb extends { query: infer TQuery } ? TQuery : undefined;
-  /** A pass-through execute escape hatch, when the underlying DB exposes one. */
-  execute: TDb extends { execute: infer TExecute } ? TExecute : undefined;
   /** Optional custom JSON serialization hook. */
   toJSON?: () => unknown;
 } & TExtensions &

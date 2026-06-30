@@ -11,6 +11,12 @@ All notable user-visible changes to this project are documented in this file.
 ### Changed
 
 - Relax scoped PostgreSQL/SQLite `.onConflictDoUpdate(...)` conflict-target validation: any conflict target is allowed while insert/update payload validators still run and scope-column reassignment still throws.
+- Stop exposing raw `execute` on scoped wrappers; use `_unsafeUnscopedDb.execute(...)` when intentionally running raw SQL.
+- Reject aliases of scoped tables unless the alias has its own explicit scoped rule, preventing aliases from silently bypassing rule lookup.
+
+### Fixed
+
+- Prevent scoped insert/update/delete result chaining from leaking raw Drizzle builders through `.returning()`, second `.where(...)`, or `$dynamic()`.
 
 ## [0.9.0] - 2026-06-29
 
