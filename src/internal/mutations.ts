@@ -1,4 +1,4 @@
-import type { SQL } from "drizzle-orm";
+import { and, type SQL } from "drizzle-orm";
 
 import type {
   ScopedDeleteBuilder,
@@ -38,8 +38,19 @@ function wrapScopedInsertResult<TScope, TTable extends ScopedTable, TResult exte
       const value = Reflect.get(target, property, target);
       if (property === "onConflictDoUpdate" && typeof value === "function") {
         return (config: unknown) => {
-          assertScopedConflictUpdateAllowed(config, rule, options);
-          return wrapScopedInsertResult(value.call(target, config), rule, options);
+          const configRecord = assertScopedConflictUpdateAllowed(config, rule, options);
+          const scopeGuard = rule.where(options.scopeValue);
+          if (!scopeGuard) {
+            throw createInvalidConflictTargetError(getRuleTableName(rule), options);
+          }
+          const { where: legacyWhere, ...configWithoutLegacyWhere } = configRecord;
+          const callerSetWhere =
+            configRecord.setWhere && legacyWhere
+              ? and(legacyWhere as SQL, configRecord.setWhere as SQL)
+              : ((configRecord.setWhere ?? legacyWhere) as SQL | undefined);
+          const setWhere = callerSetWhere ? and(callerSetWhere, scopeGuard) : scopeGuard;
+          const guardedConfig = { ...configWithoutLegacyWhere, setWhere };
+          return wrapScopedInsertResult(value.call(target, guardedConfig), rule, options);
         };
       }
 
@@ -63,18 +74,14 @@ function assertScopedConflictUpdateAllowed<TScope, TTable extends ScopedTable>(
   config: unknown,
   rule: ScopedTableRule<TScope, TTable>,
   options: NormalizedCreateScopedDbOptions<TScope>,
-): void {
+): Record<string, unknown> & { set?: unknown; setWhere?: unknown } {
   const tableName = getRuleTableName(rule);
-  const configRecord = config as { set?: unknown; target?: unknown } | null;
+  const configRecord = config as (Record<string, unknown> & { set?: unknown }) | null;
   if (!configRecord || typeof configRecord !== "object") {
     throw createInvalidConflictTargetError(tableName, options);
   }
 
-  if (
-    !rule.validateInsert ||
-    !rule.validateUpdate ||
-    !rule.hasScopeInConflictTarget?.(configRecord.target)
-  ) {
+  if (!rule.validateInsert || !rule.validateUpdate) {
     throw createInvalidConflictTargetError(tableName, options);
   }
 
@@ -83,6 +90,8 @@ function assertScopedConflictUpdateAllowed<TScope, TTable extends ScopedTable>(
   if (!set || typeof set !== "object" || !rule.validateUpdate(setRecord, options.scopeValue)) {
     throw createInvalidUpdateError(tableName, (set ?? {}) as Record<string, unknown>, options);
   }
+
+  return configRecord;
 }
 
 /** Create an insert builder that validates scoped values. */
