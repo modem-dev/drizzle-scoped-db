@@ -1,3 +1,4 @@
+import * as drizzleOrm from "drizzle-orm";
 import { and, eq, sql } from "drizzle-orm";
 
 import {
@@ -9,6 +10,7 @@ import {
 import {
   closePgIntegrationDb,
   createPgIntegrationDb,
+  createPgRelationalDb,
   pgProjects,
   seedPgProjects,
   type PgIntegrationDb,
@@ -72,6 +74,57 @@ describe("Postgres/PGlite integration", () => {
       await closePgIntegrationDb(db);
     }
   });
+
+  // Drizzle 1.0 replaced the schema-only relational query (callback `where`) with the RQBv2
+  // object-filter API (`defineRelations`). This regression targets the callback relational path
+  // that current consumers use against a real database; it is transparently skipped on Drizzle
+  // builds that only expose RQBv2 (a 1.0 variant can be added when the wrapper supports it). The
+  // version-agnostic getTableKey fix it guards is still covered on every Drizzle version by the
+  // drizzle-compat unit tests that exercise real table aliases.
+  const supportsCallbackRelationalQuery = !(
+    "defineRelations" in (drizzleOrm as Record<string, unknown>)
+  );
+
+  it.skipIf(!supportsCallbackRelationalQuery)(
+    "accepts the scope predicate in strict relational where callbacks (aliased columns)",
+    async () => {
+      // Regression: Drizzle's relational query API (`db.query.projectsTbl.findMany`) hands the where
+      // callback columns aliased to the schema key `projectsTbl`, while the rule's table reports its
+      // SQL name `integration_projects`. Strict scope-in-where detection must still recognize the
+      // scope filter through that alias instead of throwing MissingScopedPredicateError.
+      const db = await createPgRelationalDb();
+      try {
+        await seedPgProjects(db);
+        const scopedDb = createScopedDb(db, {
+          scopeName: "workspace",
+          scopeValue: "workspace-1",
+          strict: true,
+          rules: [
+            scopeByColumn(pgProjects, pgProjects.workspaceId, {
+              insertKey: "workspaceId",
+              queryName: "projectsTbl",
+            }),
+          ],
+        });
+
+        const rows = await scopedDb.query.projectsTbl.findMany({
+          where: (project, { eq: eqOp }) => eqOp(project.workspaceId, "workspace-1"),
+        });
+        expect(rows).toEqual([
+          expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
+        ]);
+
+        // A relational where that omits the scope column is still rejected through the same path.
+        await expect(
+          scopedDb.query.projectsTbl.findMany({
+            where: (project, { eq: eqOp }) => eqOp(project.id, "project-1"),
+          }),
+        ).rejects.toThrow(MissingScopedPredicateError);
+      } finally {
+        await closePgIntegrationDb(db);
+      }
+    },
+  );
 
   it("validates scoped inserts before executing real Postgres writes", async () => {
     const db = await createPgIntegrationDb();

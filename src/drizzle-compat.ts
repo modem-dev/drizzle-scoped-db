@@ -1,4 +1,8 @@
-import { getTableName, type SQL, type Table } from "drizzle-orm";
+import { type SQL, type Table } from "drizzle-orm";
+
+/** Drizzle stores the underlying table name here even when a query aliases the table (e.g. the
+ *  relational query API aliases columns to the table's TS name). */
+const ORIGINAL_TABLE_NAME = Symbol.for("drizzle:OriginalName");
 
 /** Checks whether a Drizzle SQL condition references the given column on the given table. */
 export function containsColumnFilter(
@@ -68,7 +72,8 @@ function searchForColumnInChunks(
   return false;
 }
 
-/** Alias-safe identity check: matches the column's actual query table name, including aliases. */
+/** Alias-safe identity check: matches when the column belongs to the expected scoped table, even
+ *  when the query references it through an alias (as Drizzle's relational query API does). */
 function isColumnOnTable(chunk: object, expectedTableKey?: string): boolean {
   if (!expectedTableKey) {
     return true;
@@ -77,7 +82,13 @@ function isColumnOnTable(chunk: object, expectedTableKey?: string): boolean {
   return chunkTable !== undefined && getTableKey(chunkTable) === expectedTableKey;
 }
 
-/** Resolve the table key Drizzle will use in this query (alias name for aliases). */
-function getTableKey(table: Table): string {
-  return getTableName(table);
+/** Resolve a stable identity key for a table, collapsing aliases back to the underlying table.
+ *  Drizzle's relational query API (`db.query.*.findMany({ where: (t, ...) => ... })`) hands the
+ *  callback columns whose table is aliased to the schema's TS name (e.g. `groupsTbl`), while the
+ *  rule's table reports its SQL name (e.g. `groups`). Both a plain table and an alias expose the
+ *  underlying name via the `OriginalName` symbol (Drizzle's Table constructor sets it to the SQL
+ *  name; its alias proxy preserves it), so keying on it lets aliased references match their scoped
+ *  rule while still distinguishing genuinely different tables. */
+function getTableKey(table: Table): string | undefined {
+  return (table as object as Record<symbol, string>)[ORIGINAL_TABLE_NAME];
 }
