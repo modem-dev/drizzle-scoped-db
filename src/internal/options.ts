@@ -31,6 +31,17 @@ type RuleIndexes<TScope> = {
 const ORIGINAL_TABLE_NAME = Symbol.for("drizzle:OriginalName");
 const IS_ALIAS = Symbol.for("drizzle:IsAlias");
 
+type CachedRuleIndexes = {
+  rulesSnapshot: readonly ScopedTableRule<unknown>[];
+  indexes: RuleIndexes<unknown>;
+};
+
+// Index construction is hot for apps that create one scoped wrapper per request. Cache by rules-array
+// identity, but keep a shallow snapshot so mutating a reused rules array cannot leave newly added or
+// replaced scoped rules invisible. Do not replace this with an unconditional cache lookup unless
+// rules arrays are made immutable at the API boundary.
+const ruleIndexCache = new WeakMap<ScopedTableRule<unknown>[], CachedRuleIndexes>();
+
 export type NormalizedCreateScopedDbOptions<
   TScope,
   TExtensions extends Record<string, unknown> = {},
@@ -47,8 +58,6 @@ export type NormalizedCreateScopedDbOptions<
     "unscopedDbPropertyName"
   > &
   RuleIndexes<TScope>;
-
-const ruleIndexCache = new WeakMap<ScopedTableRule<unknown>[], RuleIndexes<unknown>>();
 
 /** Normalize options and precompute rule lookup maps. */
 export function normalizeOptions<
@@ -83,12 +92,12 @@ export function normalizeOptions<
   >;
 }
 
-/** Build rule lookup indexes once for stable rule arrays so cached scoped DBs do not duplicate them per scope value. */
+/** Build or reuse rule lookup indexes for the current rules array contents. */
 function getRuleIndexes<TScope>(rules: ScopedTableRule<TScope>[]): RuleIndexes<TScope> {
   const cacheKey = rules as ScopedTableRule<unknown>[];
   const cached = ruleIndexCache.get(cacheKey);
-  if (cached) {
-    return cached as RuleIndexes<TScope>;
+  if (cached && rulesMatchSnapshot(cacheKey, cached.rulesSnapshot)) {
+    return cached.indexes as RuleIndexes<TScope>;
   }
 
   const rulesByTable = new WeakMap<object, ScopedTableRule<TScope>>();
@@ -106,9 +115,19 @@ function getRuleIndexes<TScope>(rules: ScopedTableRule<TScope>[]): RuleIndexes<T
     }
   }
 
-  const ruleIndexes = { rulesByTable, rulesByOriginalTableName, rulesByQueryName };
-  ruleIndexCache.set(cacheKey, ruleIndexes as RuleIndexes<unknown>);
-  return ruleIndexes;
+  const indexes = { rulesByTable, rulesByOriginalTableName, rulesByQueryName };
+  ruleIndexCache.set(cacheKey, {
+    rulesSnapshot: [...cacheKey],
+    indexes: indexes as RuleIndexes<unknown>,
+  });
+  return indexes;
+}
+
+function rulesMatchSnapshot(
+  rules: readonly ScopedTableRule<unknown>[],
+  snapshot: readonly ScopedTableRule<unknown>[],
+): boolean {
+  return rules.length === snapshot.length && rules.every((rule, index) => rule === snapshot[index]);
 }
 
 /** Look up exact table rules and fail closed for aliases of scoped tables. */

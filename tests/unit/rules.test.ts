@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { getRuleForTable, normalizeOptions } from "../../src/internal/options";
 import type { ScopedTableRule } from "../../src/types";
-import { projectsTbl, scopeByColumn, type Column } from "./fixtures";
+import { projectsTbl, scopeByColumn, tasksTbl, type Column } from "./fixtures";
 
 describe("scope table rule helpers", () => {
   it("detects scope columns in conflict targets by identity, arrays, and column names", () => {
@@ -86,6 +86,41 @@ describe("scoped rule indexing", () => {
     });
 
     expect(getRuleForTable(table, options)).toBe(rule);
+  });
+
+  it("rebuilds indexes from mutated rules arrays instead of reusing stale indexes", () => {
+    const originalProjectsRule = scopeByColumn(projectsTbl, projectsTbl.workspaceId);
+    const rules: ScopedTableRule<unknown>[] = [originalProjectsRule];
+
+    normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules,
+    });
+    rules.push(scopeByColumn(tasksTbl, tasksTbl.taskWorkspaceId, { queryName: "tasks" }));
+
+    const optionsAfterPush = normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules,
+    });
+
+    expect(getRuleForTable(tasksTbl, optionsAfterPush)).toBe(rules[1]);
+    expect(optionsAfterPush.rulesByQueryName.get("tasks")).toBe(rules[1]);
+
+    const replacementProjectsRule = scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+      queryName: "projects",
+    });
+    rules[0] = replacementProjectsRule;
+
+    const optionsAfterReplacement = normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules,
+    });
+
+    expect(getRuleForTable(projectsTbl, optionsAfterReplacement)).toBe(replacementProjectsRule);
+    expect(optionsAfterReplacement.rulesByQueryName.get("projects")).toBe(replacementProjectsRule);
   });
 
   it("treats non-string Drizzle original table names as absent", () => {
