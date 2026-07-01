@@ -32,6 +32,17 @@ class FakeRqbV2TableQuery {
   }
 }
 
+function configWithTransientWith<TWhere>(where: TWhere): { where: TWhere; with?: unknown } {
+  let reads = 0;
+  return Object.defineProperty({ where }, "with", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return reads === 1 ? undefined : { tasks: true };
+    },
+  });
+}
+
 describe("createScopedDb relational query guardrails", () => {
   it("wraps relational query methods when a rule declares the query property name", async () => {
     const rawDb = createFakeDb();
@@ -66,6 +77,9 @@ describe("createScopedDb relational query guardrails", () => {
     });
     expect(scopedDb.query.users.label).toBe("users table query");
     expect(() => scopedDb.query.users.findMany({ with: { projects: true } })).toThrow(
+      "does not support nested `with` relations",
+    );
+    expect(() => scopedDb.query.users.findMany(configWithTransientWith({ id: "user-1" }))).toThrow(
       "does not support nested `with` relations",
     );
   });
@@ -123,6 +137,11 @@ describe("createScopedDb relational query guardrails", () => {
         where: eq(projectsTbl.id, "project-1"),
         with: { tasks: true },
       } as never),
+    ).toThrow("does not support nested `with` relations");
+    expect(() =>
+      scopedDb.query.projects.findMany(
+        configWithTransientWith(eq(projectsTbl.id, "project-1")) as never,
+      ),
     ).toThrow("does not support nested `with` relations");
   });
 
@@ -227,6 +246,11 @@ describe("createScopedDb relational query guardrails", () => {
         where: { workspaceId: "workspace-1" },
         with: { tasks: true },
       } as never),
+    ).toThrow("does not support nested `with` relations");
+    expect(() =>
+      scopedDb.query.projects.findMany(
+        configWithTransientWith({ workspaceId: "workspace-1" }) as never,
+      ),
     ).toThrow("does not support nested `with` relations");
     expect(() => scopedDb.query.projects.findMany({ where: null as never })).toThrow(
       "Unsupported RQBv2 relational where",
