@@ -1,5 +1,6 @@
 import * as drizzleOrm from "drizzle-orm";
 import { and, eq, sql } from "drizzle-orm";
+import { pgTable, text } from "drizzle-orm/pg-core";
 
 import {
   createScopedDb,
@@ -17,6 +18,10 @@ import {
   seedPgProjects,
   type PgIntegrationDb,
 } from "./fixtures/postgres";
+
+const pgUpdateMarkers = pgTable("integration_update_markers", {
+  id: text("id").primaryKey(),
+});
 
 function createScopedPgDb(db: PgIntegrationDb, workspaceId = "workspace-1") {
   return createScopedDb(db, {
@@ -245,8 +250,23 @@ describe("Postgres/PGlite integration", () => {
         .set({ name: "Still guarded" })
         .where(eq(pgProjects.slug, "project-1")) as unknown as {
         where(condition: unknown): unknown;
+        from(table: unknown): { where(condition: unknown): { returning(): unknown } };
       };
       expect(() => updateResult.where(eq(pgProjects.slug, "project-2"))).toThrow();
+
+      await db.execute(sql.raw("create table integration_update_markers (id text primary key);"));
+      await db.insert(pgUpdateMarkers).values({ id: "marker-1" });
+      await expect(async () => {
+        await updateResult
+          .from(pgUpdateMarkers)
+          .where(eq(pgProjects.slug, "project-2"))
+          .returning();
+      }).rejects.toThrow("Scoped mutation results do not expose raw query-builder chaining.");
+      const [otherWorkspaceAfterEscapeAttempt] = await db
+        .select()
+        .from(pgProjects)
+        .where(eq(pgProjects.id, "project-2"));
+      expect(otherWorkspaceAfterEscapeAttempt?.name).toBe("Other workspace");
 
       const deletedRows = await scopedDb
         .delete(pgProjects)

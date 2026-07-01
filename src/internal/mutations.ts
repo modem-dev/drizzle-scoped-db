@@ -21,8 +21,8 @@ import {
 /**
  * Wrap the raw dialect insert result so the scoped facade can expose `$unsafeUnscoped()` — a local
  * escape that returns the raw builder (already carrying the scoped values) for conflict/upsert
- * chaining. Safe dialect methods are validated before forwarding; other terminal methods delegate to
- * the raw builder, keeping the result awaitable and preserving `.returning(...)` / `.$returningId()`.
+ * chaining. Safe dialect methods are allowlisted, validated where needed, and rewrapped when they
+ * keep chaining; unknown raw builder methods throw instead of reopening unguarded builder state.
  */
 function wrapScopedInsertResult<TScope, TTable extends ScopedTable, TResult extends object>(
   raw: TResult,
@@ -48,6 +48,14 @@ function wrapScopedInsertResult<TScope, TTable extends ScopedTable, TResult exte
           return () => {
             throw createInvalidConflictTargetError(getRuleTableName(rule), options);
           };
+        }
+
+        if (property === "then" || property === "catch" || property === "finally") {
+          return typeof value === "function" ? value.bind(raw) : value;
+        }
+
+        if (property === "$returningId" && typeof value === "function") {
+          return value.bind(raw);
         }
 
         if (property === "returning" && typeof value === "function") {
@@ -84,7 +92,13 @@ function wrapScopedInsertResult<TScope, TTable extends ScopedTable, TResult exte
           };
         }
 
-        return typeof value === "function" ? value.bind(raw) : value;
+        if (typeof value === "function") {
+          return () => {
+            throw createInvalidConflictTargetError(getRuleTableName(rule), options);
+          };
+        }
+
+        return value;
       },
     },
   ) as TResult;
@@ -225,11 +239,21 @@ function createScopedMutationResult<TRaw>(rawResult: TRaw): ScopedMutationResult
         }
 
         const value = Reflect.get(rawResult as object, property, rawResult);
+        if (property === "then" || property === "catch" || property === "finally") {
+          return typeof value === "function" ? value.bind(rawResult) : value;
+        }
+
         if (property === "returning" && typeof value === "function") {
           return (...args: unknown[]) => createScopedMutationResult(value.apply(rawResult, args));
         }
 
-        return typeof value === "function" ? value.bind(rawResult) : value;
+        if (typeof value === "function") {
+          return () => {
+            throw new Error("Scoped mutation results do not expose raw query-builder chaining.");
+          };
+        }
+
+        return value;
       },
     },
   ) as ScopedMutationResult<TRaw>;

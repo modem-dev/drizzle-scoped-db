@@ -141,7 +141,7 @@ describe("createScopedDb mutation guardrails", () => {
     expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
   });
 
-  it("prevents double .where() on scoped update results", () => {
+  it("prevents raw builder chaining escapes on scoped update results", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
@@ -155,11 +155,16 @@ describe("createScopedDb mutation guardrails", () => {
       .set({ name: "Updated" })
       .where(eq(projectsTbl.id, "project-1")) as unknown as {
       where: (condition: SQL | undefined) => unknown;
+      from: (table: unknown) => { where: (condition: SQL | undefined) => unknown };
       $dynamic: () => unknown;
     };
 
     expect(() => result.where(eq(projectsTbl.id, "project-2"))).toThrow();
     expect(() => result.$dynamic()).toThrow();
+    expect(() => result.from(projectsTbl).where(eq(projectsTbl.id, "project-2"))).toThrow(
+      "Scoped mutation results do not expose raw query-builder chaining.",
+    );
+    expect((result as unknown as { catch?: unknown }).catch).toBeUndefined();
     expect(Object.getPrototypeOf(result)).toBeNull();
     expect((result as { constructor?: unknown }).constructor).toBeUndefined();
     expect((result as { valueOf?: unknown }).valueOf).toBeUndefined();
@@ -211,8 +216,14 @@ describe("createScopedDb mutation guardrails", () => {
       .update(projectsTbl)
       .set({ name: "Updated" })
       .where(eq(projectsTbl.id, "project-1"))
-      .returning() as unknown as { where(condition: SQL | undefined): unknown };
+      .returning() as unknown as {
+      where(condition: SQL | undefined): unknown;
+      from(table: unknown): { where(condition: SQL | undefined): unknown };
+    };
     expect(() => updateResult.where(eq(projectsTbl.id, "project-2"))).toThrow();
+    expect(() => updateResult.from(projectsTbl).where(eq(projectsTbl.id, "project-2"))).toThrow(
+      "Scoped mutation results do not expose raw query-builder chaining.",
+    );
     expect(containsColumnFilter(rawDb._state.updateCondition, "workspace_id")).toBe(true);
 
     const deleteResult = scopedDb
@@ -504,6 +515,41 @@ describe("createScopedDb mutation guardrails", () => {
     expect((returned as { __defineGetter__?: unknown }).__defineGetter__).toBeUndefined();
     expect(Object.getOwnPropertyDescriptor(returned, "onConflictDoUpdate")).toBeUndefined();
     expect(rawDb._state.conflictConfig).toBeUndefined();
+  });
+
+  it("forwards only allowlisted scoped insert result methods", () => {
+    const rawDb = {
+      ...createFakeDb(),
+      insert() {
+        return {
+          values() {
+            return {
+              $returningId: () => [{ id: "project-1" }],
+              rawEscape: () => "escaped",
+            };
+          },
+        };
+      },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
+    });
+
+    const result = scopedDb.insert(projectsTbl).values({
+      id: "project-1",
+      workspaceId: "workspace-1",
+      name: "Roadmap",
+    }) as unknown as {
+      $returningId(): unknown;
+      rawEscape(): unknown;
+      catch?: unknown;
+    };
+
+    expect(result.$returningId()).toEqual([{ id: "project-1" }]);
+    expect(() => result.rawEscape()).toThrow(InvalidScopedConflictTargetError);
+    expect(result.catch).toBeUndefined();
   });
 
   it("exposes the raw insert builder via $unsafeUnscoped() only after scoped values validation runs", () => {
