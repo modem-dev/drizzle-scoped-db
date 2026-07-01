@@ -145,7 +145,7 @@ describe("createScopedDb select guardrails", () => {
     expect(containsColumnFilter(rawDb._state.joinConditions?.[1], "task_workspace_id")).toBe(true);
   });
 
-  it("leaves joined table conditions unchanged when a joined rule produces no predicate", () => {
+  it("fails closed when a joined table rule produces no predicate", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
@@ -159,15 +159,14 @@ describe("createScopedDb select guardrails", () => {
       ],
     });
 
-    scopedDb
-      .select()
-      .from(projectsTbl)
-      .leftJoin(tasksTbl, eq(tasksTbl.projectId, projectsTbl.id))
-      .where(eq(projectsTbl.id, "project-1"));
+    expect(() =>
+      scopedDb
+        .select()
+        .from(projectsTbl)
+        .leftJoin(tasksTbl, eq(tasksTbl.projectId, projectsTbl.id)),
+    ).toThrow('Scoped rule for table "tasks" did not produce a scope predicate.');
 
-    expect(rawDb._state.joinConditions).toHaveLength(1);
-    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "project_id")).toBe(true);
-    expect(containsColumnFilter(rawDb._state.joinConditions?.[0], "task_workspace_id")).toBe(false);
+    expect(rawDb._state.joinConditions).toBeUndefined();
   });
 
   it("injects scope predicates for joined tables even when the root table is unscoped", async () => {
