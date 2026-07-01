@@ -98,6 +98,7 @@ type FakeMutationResult = {
   condition: SQL | undefined;
   values?: Record<string, unknown>;
   where(condition: SQL | undefined): FakeMutationResult;
+  from(table: unknown): FakeMutationResult;
   returning(): FakeMutationResult;
   $dynamic(): FakeMutationResult;
   then<TResult1 = unknown, TResult2 = never>(
@@ -260,6 +261,9 @@ function createFakeMutationResult(
     where(nextCondition: SQL | undefined) {
       result.condition = nextCondition;
       updateCondition(nextCondition);
+      return result;
+    },
+    from(_table: unknown) {
       return result;
     },
     returning() {

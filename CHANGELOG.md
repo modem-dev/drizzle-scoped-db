@@ -10,6 +10,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Fixed
 
+- Block scoped mutation and insert result proxies from forwarding unknown raw Drizzle builder methods, preventing post-scope builder escapes such as PostgreSQL update `.from(...).where(...)` from overwriting injected scope predicates.
+
 ## [0.11.0] - 2026-06-30
 
 ### Added
