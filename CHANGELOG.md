@@ -11,6 +11,7 @@ All notable user-visible changes to this project are documented in this file.
 ### Fixed
 
 - Block scoped mutation and insert result proxies from forwarding unknown raw Drizzle builder methods, preventing post-scope builder escapes such as PostgreSQL update `.from(...).where(...)` from overwriting injected scope predicates.
+- Fail closed for Drizzle relational query `with` includes on scoped wrappers, preventing nested relation loads from bypassing scoped table rules until nested scoping is supported.
 
 ## [0.11.0] - 2026-06-30
 

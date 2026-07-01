@@ -209,15 +209,10 @@ const workspaceDb = createScopedDb(db, {
 const project = await workspaceDb.query.projects.findFirst({
   where: (project, { and, eq }) =>
     and(eq(project.id, projectId), eq(project.workspaceId, workspaceId)),
-  with: {
-    tasks: true,
-  },
 });
 ```
 
-Tables without a matching rule pass through unchanged.
-
-Relational `with` entries are root-only today: `findFirst` / `findMany` are scoped, but nested relation rows rely on scope-safe relationships, explicit relation filters, or database constraints.
+Tables without a matching rule pass through unchanged for plain root `findFirst` / `findMany` calls. When any relational scoped rule is configured, relational `with` includes fail closed because nested relation rows cannot yet be scoped safely by the wrapper. Use explicit scoped joins or separate scoped queries for related rows.
 
 ## Data model shape
 
@@ -375,7 +370,7 @@ Not protected:
 - raw SQL, `_unsafeUnscopedDb`, or helpers that close over the raw DB
 - query builder methods reached after `.$unsafeUnscoped()` or through `_unsafeUnscopedDb`
 - tables or joined tables without rules
-- nested relational `with` rows unless your relationships, filters, or constraints enforce scope safety
+- nested relational `with` rows; scoped wrappers reject `with` includes when relational scoped rules are configured, so use explicit scoped joins or separate scoped queries
 - invalid cross-scope rows that your database constraints allow
 - deliberate bypasses of the scoped DB capability
 

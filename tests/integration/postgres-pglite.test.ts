@@ -1,5 +1,5 @@
 import * as drizzleOrm from "drizzle-orm";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
 
 import {
@@ -121,6 +121,17 @@ describe("Postgres/PGlite integration", () => {
           expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
         ]);
 
+        const scopedWhere = (
+          project: { workspaceId: unknown },
+          { eq: eqOp }: { eq: (left: unknown, right: unknown) => SQL },
+        ) => eqOp(project.workspaceId, "workspace-1");
+        expect(() =>
+          scopedDb.query.projectsTbl.findMany({
+            where: scopedWhere,
+            with: {},
+          } as never),
+        ).toThrow("does not support nested `with` relations");
+
         // A relational where that omits the scope column is still rejected through the same path.
         await expect(
           scopedDb.query.projectsTbl.findMany({
@@ -164,6 +175,13 @@ describe("Postgres/PGlite integration", () => {
         expect(rows).toEqual([
           expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
         ]);
+
+        expect(() =>
+          scopedDb.query.projectsTbl.findMany({
+            where: { workspaceId: "workspace-1" },
+            with: {},
+          } as never),
+        ).toThrow("does not support nested `with` relations");
 
         const crossScopeRows = await scopedDb.query.projectsTbl.findMany({
           where: { workspaceId: "workspace-2" },

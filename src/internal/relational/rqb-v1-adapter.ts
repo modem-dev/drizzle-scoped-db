@@ -8,6 +8,7 @@ import {
   scopeCondition,
 } from "../scope.js";
 import {
+  assertNoRelationalWith,
   bindRelationalMethod,
   type RelationalMethod,
   type RelationalMethodConfig,
@@ -41,6 +42,7 @@ export class RqbV1RelationalAdapter implements RelationalQueryAdapter {
     options: NormalizedCreateScopedDbOptions<TScope>,
   ): (config?: RelationalMethodConfig<RelationalWhere<unknown>>) => Promise<TResult> {
     return (config) => {
+      assertNoRelationalWith(config, getRuleTableName(rule));
       const originalWhere = config?.where;
 
       if (originalWhere === undefined && isStrictMode(options)) {
