@@ -8,6 +8,20 @@ export type RelationalMethod<TWhere, TResult> = (
   config?: RelationalMethodConfig<TWhere>,
 ) => Promise<TResult>;
 
+/** Fail closed for nested relational includes until scoped traversal is supported. */
+export function assertNoRelationalWith(config: unknown, tableName: string): void {
+  if (
+    config &&
+    typeof config === "object" &&
+    "with" in config &&
+    (config as { with?: unknown }).with !== undefined
+  ) {
+    throw new Error(
+      `Scoped relational query on table "${tableName}" does not support nested \`with\` relations because nested relations cannot be scoped safely. Use explicit scoped joins or separate scoped queries.`,
+    );
+  }
+}
+
 export interface RelationalQueryAdapter {
   readonly name: string;
 

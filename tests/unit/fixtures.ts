@@ -118,7 +118,15 @@ export type FakeDb = {
       }): Promise<{ condition: SQL | undefined }[]>;
     };
     users: {
-      findMany(config?: { limit?: number }): Promise<{ config: { limit?: number } | undefined }[]>;
+      label: string;
+      findFirst(config?: {
+        limit?: number;
+        with?: unknown;
+      }): Promise<{ config: { limit?: number; with?: unknown } | undefined }>;
+      findMany(config?: {
+        limit?: number;
+        with?: unknown;
+      }): Promise<{ config: { limit?: number; with?: unknown } | undefined }[]>;
     };
     metadata: string;
     incomplete: {
@@ -159,7 +167,11 @@ export function createFakeDb(state: FakeDbState = {}): FakeDb {
         },
       },
       users: {
-        async findMany(config?: { limit?: number }) {
+        label: "users table query",
+        async findFirst(config?: { limit?: number; with?: unknown }) {
+          return { config };
+        },
+        async findMany(config?: { limit?: number; with?: unknown }) {
           return [{ config }];
         },
       },

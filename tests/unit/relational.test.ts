@@ -51,7 +51,7 @@ describe("createScopedDb relational query guardrails", () => {
     expect(containsColumnFilter(rawDb._state.relationalCondition, "workspace_id")).toBe(true);
   });
 
-  it("leaves unscoped relational query methods unchanged", async () => {
+  it("leaves unscoped relational query methods usable while rejecting nested includes", async () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
       scopeValue: "workspace-1",
@@ -61,9 +61,27 @@ describe("createScopedDb relational query guardrails", () => {
     await expect(scopedDb.query.users.findMany({ limit: 5 })).resolves.toEqual([
       { config: { limit: 5 } },
     ]);
+    await expect(scopedDb.query.users.findFirst({ limit: 1 })).resolves.toEqual({
+      config: { limit: 1 },
+    });
+    expect(scopedDb.query.users.label).toBe("users table query");
+    expect(() => scopedDb.query.users.findMany({ with: { projects: true } })).toThrow(
+      "does not support nested `with` relations",
+    );
   });
 
-  it("passes through relational table queries when no query-name rule is declared for that table", () => {
+  it("leaves relational queries unchanged when no relational query rules are configured", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    expect(scopedDb.query.projects).toBe(rawDb.query.projects);
+  });
+
+  it("guards relational table queries without a matching query-name rule against nested includes", async () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
@@ -71,7 +89,16 @@ describe("createScopedDb relational query guardrails", () => {
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "otherProjects" })],
     });
 
-    expect(scopedDb.query.projects).toBe(rawDb.query.projects);
+    const condition = eq(projectsTbl.id, "p1");
+    await expect(scopedDb.query.projects.findMany({ where: condition })).resolves.toEqual([
+      { condition },
+    ]);
+    expect(() =>
+      scopedDb.query.projects.findMany({
+        where: eq(projectsTbl.id, "p1"),
+        with: { tasks: true },
+      } as never),
+    ).toThrow("does not support nested `with` relations");
   });
 
   it("supports relational findMany, direct SQL where clauses, caching, and pass-through query properties", async () => {
@@ -91,6 +118,12 @@ describe("createScopedDb relational query guardrails", () => {
     expect((scopedDb.query as Record<PropertyKey, unknown>)[Symbol.toStringTag]).toBeUndefined();
     expect((scopedDb.query as Record<string, unknown>).metadata).toBe("unwrapped metadata");
     expect((scopedDb.query as Record<string, unknown>).incomplete).toBe(rawDb.query.incomplete);
+    expect(() =>
+      scopedDb.query.projects.findMany({
+        where: eq(projectsTbl.id, "project-1"),
+        with: { tasks: true },
+      } as never),
+    ).toThrow("does not support nested `with` relations");
   });
 
   it("enforces strict where validation on relational queries", async () => {
@@ -189,6 +222,12 @@ describe("createScopedDb relational query guardrails", () => {
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
     });
 
+    expect(() =>
+      scopedDb.query.projects.findMany({
+        where: { workspaceId: "workspace-1" },
+        with: { tasks: true },
+      } as never),
+    ).toThrow("does not support nested `with` relations");
     expect(() => scopedDb.query.projects.findMany({ where: null as never })).toThrow(
       "Unsupported RQBv2 relational where",
     );

@@ -10,7 +10,7 @@ import {
   type NormalizedCreateScopedDbOptions,
   normalizeOptions,
 } from "./internal/options.js";
-import { createScopedTableQuery } from "./internal/relational.js";
+import { createRelationalWithGuard, createScopedTableQuery } from "./internal/relational.js";
 import { createScopedSelectBuilder } from "./internal/select.js";
 
 /** Create a Drizzle wrapper that injects declared table scope predicates. */
@@ -73,16 +73,18 @@ function createScopedDbInternal<
             return tableQuery;
           }
 
+          const relationalTableQuery = tableQuery as { findFirst: unknown; findMany: unknown };
           const rule = options.rulesByQueryName.get(prop);
           if (!rule) {
-            return tableQuery;
+            const unscopedWrapped =
+              options.rulesByQueryName.size > 0
+                ? createRelationalWithGuard(relationalTableQuery, prop)
+                : tableQuery;
+            wrappedTableQueryCache.set(prop, unscopedWrapped);
+            return unscopedWrapped;
           }
 
-          const wrapped = createScopedTableQuery(
-            tableQuery as { findFirst: unknown; findMany: unknown },
-            rule,
-            options,
-          );
+          const wrapped = createScopedTableQuery(relationalTableQuery, rule, options);
           wrappedTableQueryCache.set(prop, wrapped);
           return wrapped;
         },
