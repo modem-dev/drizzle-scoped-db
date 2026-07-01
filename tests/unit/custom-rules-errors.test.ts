@@ -142,7 +142,7 @@ describe("createScopedDb custom rules and errors", () => {
     ).toThrow(MissingScopedPredicateError);
   });
 
-  it("supports scope rules that sometimes do not produce a predicate when strict mode is disabled", () => {
+  it("fails closed when a scoped rule does not produce a predicate", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
@@ -154,9 +154,24 @@ describe("createScopedDb custom rules and errors", () => {
         }),
       ],
     });
+    const expectedError = 'Scoped rule for table "projects" did not produce a scope predicate.';
 
-    scopedDb.select().from(projectsTbl).where(eq(projectsTbl.id, "project-1"));
-    expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(true);
-    expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(false);
+    expect(() =>
+      scopedDb.select().from(projectsTbl).where(eq(projectsTbl.id, "project-1")),
+    ).toThrow(expectedError);
+    expect(() =>
+      (scopedDb.select().from(projectsTbl) as unknown as PromiseLike<unknown>).then(
+        () => undefined,
+      ),
+    ).toThrow(expectedError);
+    expect(() =>
+      scopedDb.update(projectsTbl).set({ name: "Updated" }).where(eq(projectsTbl.id, "project-1")),
+    ).toThrow(expectedError);
+    expect(() => scopedDb.delete(projectsTbl).where(eq(projectsTbl.id, "project-1"))).toThrow(
+      expectedError,
+    );
+    expect(rawDb._state.selectCondition).toBeUndefined();
+    expect(rawDb._state.updateCondition).toBeUndefined();
+    expect(rawDb._state.deleteCondition).toBeUndefined();
   });
 });

@@ -40,12 +40,11 @@ export function scopeJoinCondition<TScope>(
   rule: ScopedTableRule<TScope> | undefined,
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): SQL | undefined {
-  const scopedPredicate = rule?.where(options.scopeValue);
-  if (!scopedPredicate) {
+  if (!rule) {
     return condition;
   }
 
-  return and(condition, scopedPredicate) as SQL;
+  return and(condition, requireScopePredicate(rule, options)) as SQL;
 }
 
 /** Combine a user condition with one table's declared scope predicate. */
@@ -57,14 +56,25 @@ export function scopeCondition<TScope>(
   if (!rule) {
     return condition;
   }
-  const scopedPredicate = rule.where(options.scopeValue);
+  const scopedPredicate = requireScopePredicate(rule, options);
   if (!condition) {
     return scopedPredicate;
   }
-  if (!scopedPredicate) {
-    return condition;
-  }
   return and(condition, scopedPredicate);
+}
+
+/** Resolve a rule predicate and fail closed if a protected table cannot be scoped. */
+export function requireScopePredicate<TScope>(
+  rule: ScopedTableRule<TScope>,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+): SQL {
+  const scopedPredicate = rule.where(options.scopeValue);
+  if (!scopedPredicate) {
+    throw new Error(
+      `Scoped rule for table "${getRuleTableName(rule)}" did not produce a scope predicate.`,
+    );
+  }
+  return scopedPredicate;
 }
 
 /** Resolve a rule's table name. */
