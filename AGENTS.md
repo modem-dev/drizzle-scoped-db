@@ -21,9 +21,9 @@
 
 ## Working rules
 
-- Keep the public API small and stable.
-- Preserve dialect-generic Drizzle core types where possible.
-- Treat `_unsafeUnscopedDb` and `.$unsafeUnscoped()` as the intentionally loud raw escapes.
+- Keep the public API small and stable: cover the common 95% of scoped queries, not the full Drizzle API.
+- Treat the scoped facade as a narrow safe subset. Advanced builder shapes must be explicitly modeled with tests or fail loud/fail closed behind `_unsafeUnscopedDb` / `.$unsafeUnscoped()`.
+- Preserve dialect-generic Drizzle core types where possible within that supported surface.
 - Do not expose unloud raw Drizzle builder escape paths from scoped facades; be especially careful with fluent methods like `.where(...)`, `.returning(...)`, `$dynamic()`, and conflict/upsert methods.
 - Fail closed for ambiguous scoped table aliases unless the alias has its own explicit scoped rule.
 - Keep scoped upserts safe by deriving guards from `rule.where(scopeValue)` and injecting them into `setWhere`; do not require conflict targets to include the scope column.
