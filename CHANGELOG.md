@@ -13,6 +13,7 @@ All notable user-visible changes to this project are documented in this file.
 - Block scoped mutation and insert result proxies from forwarding unknown raw Drizzle builder methods, preventing post-scope builder escapes such as PostgreSQL update `.from(...).where(...)` from overwriting injected scope predicates.
 - Fail closed for Drizzle relational query `with` includes on scoped wrappers, preventing nested relation loads from bypassing scoped table rules until nested scoping is supported.
 - Fail closed when a scoped table rule cannot produce its scope predicate, preventing custom rules from accidentally executing protected selects, joins, updates, or deletes without defense-in-depth scope injection.
+- Validate cached scoped rule indexes against the current rules array contents, avoiding stale lookups if callers mutate a rules array between `createScopedDb(...)` calls.
 
 ## [0.11.0] - 2026-06-30
 
