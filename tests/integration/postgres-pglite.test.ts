@@ -1,6 +1,6 @@
 import * as drizzleOrm from "drizzle-orm";
 import { and, eq, sql, type SQL } from "drizzle-orm";
-import { pgTable, text } from "drizzle-orm/pg-core";
+import { alias as pgAlias, pgTable, text } from "drizzle-orm/pg-core";
 
 import {
   createScopedDb,
@@ -15,7 +15,9 @@ import {
   createPgRelationalDb,
   createPgRqbV2RelationalDb,
   pgProjects,
+  pgTasks,
   seedPgProjects,
+  seedPgTasks,
   type PgIntegrationDb,
 } from "./fixtures/postgres";
 
@@ -30,6 +32,9 @@ function createScopedPgDb(db: PgIntegrationDb, workspaceId = "workspace-1") {
     strict: false,
     rules: [
       scopeByColumn(pgProjects, pgProjects.workspaceId, {
+        insertKey: "workspaceId",
+      }),
+      scopeByColumn(pgTasks, pgTasks.workspaceId, {
         insertKey: "workspaceId",
       }),
     ],
@@ -48,6 +53,106 @@ describe("Postgres/PGlite integration", () => {
       expect(rows).toEqual([
         expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
       ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("scopes inner joins against the real PGlite driver", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      await seedPgTasks(db);
+      const scopedDb = createScopedPgDb(db);
+
+      const rows = await scopedDb
+        .select({
+          projectId: pgProjects.id,
+          taskId: pgTasks.id,
+          taskWorkspaceId: pgTasks.workspaceId,
+        })
+        .from(pgProjects)
+        .innerJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+
+      expect(rows).toEqual([
+        { projectId: "project-1", taskId: "task-1", taskWorkspaceId: "workspace-1" },
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("preserves left-joined root rows when only out-of-scope joined rows exist", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      await db.insert(pgProjects).values({
+        id: "project-3",
+        workspaceId: "workspace-1",
+        slug: "project-3",
+        name: "No in-scope tasks",
+      });
+      await seedPgTasks(db);
+      const scopedDb = createScopedPgDb(db);
+
+      const rows = await scopedDb
+        .select({ projectId: pgProjects.id, taskId: pgTasks.id })
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+
+      expect(rows.sort((left, right) => left.projectId.localeCompare(right.projectId))).toEqual([
+        { projectId: "project-1", taskId: "task-1" },
+        { projectId: "project-3", taskId: null },
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("scopes joined tables even when the root table has no scoped rule", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      await seedPgTasks(db);
+      const scopedDb = createScopedDb(db, {
+        scopeName: "workspace",
+        scopeValue: "workspace-1",
+        strict: false,
+        rules: [
+          scopeByColumn(pgTasks, pgTasks.workspaceId, {
+            insertKey: "workspaceId",
+          }),
+        ],
+      });
+
+      const rows = await scopedDb
+        .select({ projectId: pgProjects.id, taskId: pgTasks.id })
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+
+      expect(rows.sort((left, right) => left.projectId.localeCompare(right.projectId))).toEqual([
+        { projectId: "project-1", taskId: "task-1" },
+        { projectId: "project-2", taskId: null },
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("fails closed for scoped joined-table aliases without explicit alias rules", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      const scopedDb = createScopedPgDb(db);
+      const taskAlias = pgAlias(pgTasks, "task_alias");
+
+      expect(() =>
+        scopedDb
+          .select()
+          .from(pgProjects)
+          .leftJoin(taskAlias, eq(taskAlias.projectId, pgProjects.id)),
+      ).toThrow(
+        'Aliased scoped table "integration_tasks" is not supported unless the alias has its own explicit scoped rule.',
+      );
     } finally {
       await closePgIntegrationDb(db);
     }

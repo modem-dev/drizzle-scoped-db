@@ -15,6 +15,13 @@ export const pgProjects = pgTable(
   (table) => [uniqueIndex("integration_projects_slug_unique").on(table.slug)],
 );
 
+export const pgTasks = pgTable("integration_tasks", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  workspaceId: text("workspace_id").notNull(),
+  title: text("title").notNull(),
+});
+
 export type PgIntegrationDb = PgliteDatabase<Record<string, never>> & { $client: PGlite };
 
 const PROJECTS_DDL = `
@@ -27,11 +34,20 @@ const PROJECTS_DDL = `
     );
   `;
 
+const TASKS_DDL = `
+    create table integration_tasks (
+      id text primary key,
+      project_id text not null,
+      workspace_id text not null,
+      title text not null
+    );
+  `;
+
 export async function createPgIntegrationDb(): Promise<PgIntegrationDb> {
   const client = new PGlite();
   const db = drizzle({ client });
 
-  await db.execute(sql.raw(PROJECTS_DDL));
+  await createPgIntegrationSchema(db);
 
   return db;
 }
@@ -82,7 +98,7 @@ export async function createPgRelationalDb(): Promise<PgRelationalDb> {
   }) => PgIntegrationDb;
   const db = makeDb({ client, schema: pgRelationalSchema });
 
-  await db.execute(sql.raw(PROJECTS_DDL));
+  await createPgIntegrationSchema(db);
 
   return db as unknown as PgRelationalDb;
 }
@@ -103,9 +119,14 @@ export async function createPgRqbV2RelationalDb(): Promise<PgRqbV2RelationalDb> 
   }) => PgIntegrationDb;
   const db = makeDb({ client, relations: defineRelations(pgRelationalSchema, () => ({})) });
 
-  await db.execute(sql.raw(PROJECTS_DDL));
+  await createPgIntegrationSchema(db);
 
   return db as unknown as PgRqbV2RelationalDb;
+}
+
+async function createPgIntegrationSchema(db: Pick<PgIntegrationDb, "execute">): Promise<void> {
+  await db.execute(sql.raw(PROJECTS_DDL));
+  await db.execute(sql.raw(TASKS_DDL));
 }
 
 export async function seedPgProjects(db: Pick<PgIntegrationDb, "insert">): Promise<void> {
@@ -123,6 +144,35 @@ export async function seedPgProjects(db: Pick<PgIntegrationDb, "insert">): Promi
       slug: "project-2",
       name: "Other workspace",
       regionId: "us-west-2",
+    },
+  ]);
+}
+
+export async function seedPgTasks(db: Pick<PgIntegrationDb, "insert">): Promise<void> {
+  await db.insert(pgTasks).values([
+    {
+      id: "task-1",
+      projectId: "project-1",
+      workspaceId: "workspace-1",
+      title: "In-scope task",
+    },
+    {
+      id: "task-2",
+      projectId: "project-1",
+      workspaceId: "workspace-2",
+      title: "Mismatched workspace task",
+    },
+    {
+      id: "task-3",
+      projectId: "project-2",
+      workspaceId: "workspace-2",
+      title: "Other workspace task",
+    },
+    {
+      id: "task-4",
+      projectId: "project-3",
+      workspaceId: "workspace-2",
+      title: "Only out-of-scope task",
     },
   ]);
 }

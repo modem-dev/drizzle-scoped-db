@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { alias as sqliteAlias } from "drizzle-orm/sqlite-core";
 
 import {
   createScopedDb,
@@ -10,7 +11,9 @@ import {
   closeSqliteIntegrationDb,
   createSqliteIntegrationDb,
   seedSqliteProjects,
+  seedSqliteTasks,
   sqliteProjects,
+  sqliteTasks,
   type SqliteIntegrationDb,
 } from "./fixtures/sqlite";
 
@@ -21,6 +24,9 @@ function createScopedSqliteDb(db: SqliteIntegrationDb, workspaceId = "workspace-
     strict: false,
     rules: [
       scopeByColumn(sqliteProjects, sqliteProjects.workspaceId, {
+        insertKey: "workspaceId",
+      }),
+      scopeByColumn(sqliteTasks, sqliteTasks.workspaceId, {
         insertKey: "workspaceId",
       }),
     ],
@@ -39,6 +45,106 @@ describe("SQLite/sql.js integration", () => {
       expect(rows).toEqual([
         expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
       ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("scopes inner joins against the real SQLite Drizzle driver", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      await seedSqliteTasks(harness.db);
+      const scopedDb = createScopedSqliteDb(harness.db);
+
+      const rows = await scopedDb
+        .select({
+          projectId: sqliteProjects.id,
+          taskId: sqliteTasks.id,
+          taskWorkspaceId: sqliteTasks.workspaceId,
+        })
+        .from(sqliteProjects)
+        .innerJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id));
+
+      expect(rows).toEqual([
+        { projectId: "project-1", taskId: "task-1", taskWorkspaceId: "workspace-1" },
+      ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("preserves left-joined root rows when only out-of-scope joined rows exist", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      await harness.db.insert(sqliteProjects).values({
+        id: "project-3",
+        workspaceId: "workspace-1",
+        slug: "project-3",
+        name: "No in-scope tasks",
+      });
+      await seedSqliteTasks(harness.db);
+      const scopedDb = createScopedSqliteDb(harness.db);
+
+      const rows = await scopedDb
+        .select({ projectId: sqliteProjects.id, taskId: sqliteTasks.id })
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id));
+
+      expect(rows.sort((left, right) => left.projectId.localeCompare(right.projectId))).toEqual([
+        { projectId: "project-1", taskId: "task-1" },
+        { projectId: "project-3", taskId: null },
+      ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("scopes joined tables even when the root table has no scoped rule", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      await seedSqliteTasks(harness.db);
+      const scopedDb = createScopedDb(harness.db, {
+        scopeName: "workspace",
+        scopeValue: "workspace-1",
+        strict: false,
+        rules: [
+          scopeByColumn(sqliteTasks, sqliteTasks.workspaceId, {
+            insertKey: "workspaceId",
+          }),
+        ],
+      });
+
+      const rows = await scopedDb
+        .select({ projectId: sqliteProjects.id, taskId: sqliteTasks.id })
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id));
+
+      expect(rows.sort((left, right) => left.projectId.localeCompare(right.projectId))).toEqual([
+        { projectId: "project-1", taskId: "task-1" },
+        { projectId: "project-2", taskId: null },
+      ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("fails closed for scoped joined-table aliases without explicit alias rules", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      const scopedDb = createScopedSqliteDb(harness.db);
+      const taskAlias = sqliteAlias(sqliteTasks, "task_alias");
+
+      expect(() =>
+        scopedDb
+          .select()
+          .from(sqliteProjects)
+          .leftJoin(taskAlias, eq(taskAlias.projectId, sqliteProjects.id)),
+      ).toThrow(
+        'Aliased scoped table "integration_tasks" is not supported unless the alias has its own explicit scoped rule.',
+      );
     } finally {
       closeSqliteIntegrationDb(harness);
     }
