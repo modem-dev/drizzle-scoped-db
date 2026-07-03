@@ -158,6 +158,47 @@ describe("Postgres/PGlite integration", () => {
     }
   });
 
+  it("scopes selectDistinct and selectDistinctOn against the real PGlite driver", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      await db.insert(pgProjects).values([
+        {
+          id: "project-3",
+          workspaceId: "workspace-1",
+          slug: "project-3",
+          name: "Duplicate region",
+          regionId: "us-east-1",
+        },
+        {
+          id: "project-4",
+          workspaceId: "workspace-2",
+          slug: "project-4",
+          name: "Cross-scope duplicate region",
+          regionId: "us-east-1",
+        },
+      ]);
+      const scopedDb = createScopedPgDb(db);
+
+      const distinctRegions = await scopedDb
+        .selectDistinct({ regionId: pgProjects.regionId })
+        .from(pgProjects);
+      expect(distinctRegions).toEqual([{ regionId: "us-east-1" }]);
+
+      const distinctOnRows = await scopedDb
+        .selectDistinctOn([pgProjects.regionId], {
+          id: pgProjects.id,
+          regionId: pgProjects.regionId,
+        })
+        .from(pgProjects);
+      expect(distinctOnRows).toHaveLength(1);
+      expect(distinctOnRows[0]?.regionId).toBe("us-east-1");
+      expect(["project-1", "project-3"]).toContain(distinctOnRows[0]?.id);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
   it("keeps strict where validation active with real Drizzle SQL predicates", async () => {
     const db = await createPgIntegrationDb();
     try {

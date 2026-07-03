@@ -150,6 +150,40 @@ describe("SQLite/sql.js integration", () => {
     }
   });
 
+  it("scopes selectDistinct and leaves selectDistinctOn absent at runtime", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      await harness.db.insert(sqliteProjects).values([
+        {
+          id: "project-3",
+          workspaceId: "workspace-1",
+          slug: "project-3",
+          name: "Duplicate region",
+          regionId: "us-east-1",
+        },
+        {
+          id: "project-4",
+          workspaceId: "workspace-2",
+          slug: "project-4",
+          name: "Cross-scope duplicate region",
+          regionId: "us-east-1",
+        },
+      ]);
+      const scopedDb = createScopedSqliteDb(harness.db);
+
+      const distinctRegions = await scopedDb
+        .selectDistinct({ regionId: sqliteProjects.regionId })
+        .from(sqliteProjects);
+      expect(distinctRegions).toEqual([{ regionId: "us-east-1" }]);
+      expect(
+        (scopedDb as unknown as { selectDistinctOn?: unknown }).selectDistinctOn,
+      ).toBeUndefined();
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
   it("keeps strict where validation active with real SQLite SQL predicates", async () => {
     const harness = await createSqliteIntegrationDb();
     try {
