@@ -33,6 +33,22 @@ describe("public type surface", () => {
     void _assertReturningTypes;
   });
 
+  it("preserves transaction callback modes for real sync and async dialect types", () => {
+    const _assertTransactionModes = (pgDb: PgScopedDb, sqliteDb: SqliteScopedDb) => {
+      pgDb.transaction(async (tx) => {
+        tx.select().from(pgProjects);
+        return "ok";
+      });
+      sqliteDb.transaction((tx) => {
+        tx.select().from(sqliteProjects);
+        return "ok";
+      });
+      // @ts-expect-error SQL.js transactions are synchronous; async callbacks cannot roll back after await.
+      sqliteDb.transaction(async () => "unsafe");
+    };
+    void _assertTransactionModes;
+  });
+
   it("preserves custom properties and extensions on root and transaction handles", () => {
     type Scope = { workspaceId: string };
     type Extensions = { assertWorkspace(expected: string): void };

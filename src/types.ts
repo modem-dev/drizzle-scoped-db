@@ -205,7 +205,8 @@ export type ScopedReturning<TRaw, TTable> = [TRaw] extends [{ returning: unknown
  * table-precise `.returning(...)`.
  */
 export type ScopedMutationResult<TRaw = unknown, TTable = ScopedTable> = Promise<Awaited<TRaw>> &
-  ScopedReturning<TRaw, TTable>;
+  ScopedReturning<TRaw, TTable> &
+  ForwardMethod<TRaw, "run">;
 
 /**
  * Terminal result of a scoped insert. Everything {@link ScopedMutationResult} offers (awaitable plus
@@ -334,6 +335,18 @@ export interface ScopedDeleteBuilder<TRawDelete = unknown, TTable = ScopedTable>
   where(condition: SQL | undefined): ScopedMutationResult<RawWhereResult<TRawDelete>, TTable>;
 }
 
+/** Preserve the underlying driver's transaction callback mode: async drivers accept async callbacks, sync drivers accept sync callbacks. */
+export type ScopedTransactionCallbackResult<TDb, TResult> = TDb extends {
+  transaction(
+    callback: (tx: unknown) => "__drizzle_scoped_db_sync_probe__",
+    ...args: unknown[]
+  ): "__drizzle_scoped_db_sync_probe__" | Promise<"__drizzle_scoped_db_sync_probe__">;
+}
+  ? TResult extends PromiseLike<unknown>
+    ? never
+    : TResult
+  : Promise<TResult>;
+
 /** Surface exposed by scoped Drizzle database wrappers. */
 export type ScopedDb<
   TDb extends object,
@@ -375,7 +388,7 @@ export type ScopedDb<
   transaction<T>(
     callback: (
       tx: ScopedDb<TDb, TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName>,
-    ) => Promise<T>,
+    ) => ScopedTransactionCallbackResult<TDb, T>,
   ): Promise<T>;
   /** The raw relational query API, with scoped wrappers on protected tables. */
   query: TDb extends { query: infer TQuery } ? TQuery : undefined;

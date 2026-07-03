@@ -8,6 +8,7 @@ All notable user-visible changes to this project are documented in this file.
 
 - Add real-driver PostgreSQL and SQLite integration coverage for scoped joins, including joined-table scope predicates, left-join outer-row preservation, unscoped roots joined to scoped tables, and fail-closed joined aliases.
 - Add real-driver `selectDistinct` / PostgreSQL `selectDistinctOn` coverage plus public type-surface checks for real dialect DB types and emitted declarations.
+- Add real-driver PostgreSQL and SQLite mutation coverage for strict-false bulk updates/deletes, awaitable inserts/upserts without `returning()`, guarded runtime mutation surfaces, and transaction mutation rollback/no-op behavior.
 
 ### Changed
 
@@ -17,6 +18,8 @@ All notable user-visible changes to this project are documented in this file.
 - Fail closed for Drizzle relational query `with` includes on scoped wrappers, preventing nested relation loads from bypassing scoped table rules until nested scoping is supported.
 - Fail closed when a scoped table rule cannot produce its scope predicate, preventing custom rules from accidentally executing protected selects, joins, updates, or deletes without defense-in-depth scope injection.
 - Validate cached scoped rule indexes against the current rules array contents, avoiding stale lookups if callers mutate a rules array between `createScopedDb(...)` calls.
+- Preserve synchronous transaction callback semantics for sync Drizzle drivers, allowing scoped SQLite/sql.js transactions to roll back on synchronous callback errors instead of forcing an async callback wrapper.
+- Forward scoped mutation `.run()` terminal execution when the underlying dialect exposes it, so sync drivers can execute scoped mutations inside synchronous transaction callbacks without reopening raw builder chaining.
 
 ## [0.11.0] - 2026-06-30
 
