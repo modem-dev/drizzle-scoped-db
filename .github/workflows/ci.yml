@@ -38,6 +38,7 @@ jobs:
       - run: pnpm test
       - run: pnpm coverage
       - run: pnpm build
+      - run: pnpm typecheck:dist
       - run: npm pack --dry-run
       - name: Smoke test Drizzle 1.0 rc compatibility
         if: matrix.drizzle_label == 'rc'

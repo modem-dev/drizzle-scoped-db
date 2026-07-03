@@ -49,8 +49,9 @@
     "lint": "oxlint . --deny-warnings",
     "lint:fix": "oxlint . --fix",
     "prepare": "simple-git-hooks",
-    "prepublishOnly": "pnpm test && pnpm coverage && pnpm build",
+    "prepublishOnly": "pnpm test && pnpm coverage && pnpm build && pnpm typecheck:dist",
     "test": "vitest run --typecheck",
+    "typecheck:dist": "tsc -p tests/dist-consumer/tsconfig.json",
     "test:watch": "vitest --watch --typecheck",
     "typecheck": "tsc --noEmit"
   },
