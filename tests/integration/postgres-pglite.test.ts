@@ -1,5 +1,5 @@
 import * as drizzleOrm from "drizzle-orm";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, ne, sql, type SQL } from "drizzle-orm";
 import { alias as pgAlias, pgTable, text } from "drizzle-orm/pg-core";
 
 import {
@@ -223,6 +223,32 @@ describe("Postgres/PGlite integration", () => {
           .from(pgProjects)
           .where(and(eq(pgProjects.id, "project-1"), eq(pgProjects.workspaceId, "workspace-1"))),
       ).resolves.toEqual([]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("ands the injected scope guard onto syntactically valid but misleading strict SQL predicates", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      const scopedDb = createScopedDb(db, {
+        scopeName: "workspace",
+        scopeValue: "workspace-1",
+        strict: true,
+        rules: [
+          scopeByColumn(pgProjects, pgProjects.workspaceId, {
+            insertKey: "workspaceId",
+          }),
+        ],
+      });
+
+      const rows = await scopedDb
+        .select({ id: pgProjects.id, workspaceId: pgProjects.workspaceId })
+        .from(pgProjects)
+        .where(ne(pgProjects.workspaceId, "workspace-1"));
+
+      expect(rows).toEqual([]);
     } finally {
       await closePgIntegrationDb(db);
     }

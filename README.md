@@ -11,7 +11,7 @@
   <img src="./assets/before-after.png" width="820" alt="With a plain Drizzle handle a forgotten org filter silently returns every org's rows; with a drizzle-scoped-db handle the same query throws MissingScopedWhereError, caught before it ships." />
 </p>
 
-It wraps a Drizzle ORM handle in a typed, scoped one (`orgDb`, `tenantDb`, `workspaceDb`). The guardrail fits any predicate a query must never forget: tenant, org, user, region, soft-delete. Scope predicates are injected into your queries automatically, and in strict mode a scoped query that forgets its predicate throws at the call site, before it reaches the database.
+It wraps a Drizzle ORM handle in a typed, scoped one (`orgDb`, `tenantDb`, `workspaceDb`). The guardrail fits any predicate a query must never forget: tenant, org, user, region, soft-delete. Scope predicates are injected into your queries automatically, and in strict mode a scoped query that forgets to include scope context throws at the call site, before it reaches the database.
 
 ```ts
 // Throws MissingScopedWhereError instead of returning every workspace's projects
@@ -23,7 +23,7 @@ await workspaceDb.select().from(projects).where(eq(projects.workspaceId, workspa
 
 ### TL;DR
 
-- 🛡️ **Strict by default.** A missing `where` or scope predicate throws instead of leaking rows.
+- 🛡️ **Strict by default.** A missing `where` or missing scope context throws instead of leaking rows.
 - 🤖 **Catches the mistakes humans, codegen, and AI agents make.** The forgotten scope filter surfaces in review and at runtime, not in an incident.
 - 🧩 **Dialect-generic.** Built on Drizzle core types (Postgres, SQLite, MySQL, SingleStore), no DB lock-in. Layers with RLS rather than replacing it.
 
@@ -45,7 +45,7 @@ RLS gives you a boundary the application can't bypass, but it lives in the datab
 
 - Pass typed scoped DB handles instead of the raw DB.
 - Declare scoping rules once per table.
-- Strict mode by default: missing `where` or missing scope predicate throws.
+- Strict mode by default: missing `where` or missing scope context throws.
 - Inject scope predicates into supported selects, joins, mutations, and relational root queries.
 - Validate scoped inserts before they reach the database.
 - Catch missing predicates in human-written, generated, or agent-authored code.
@@ -89,11 +89,11 @@ Conceptually, strict mode makes scoped reads look like this:
 
 ```sql
 WHERE projects.id = projectId
-  AND projects.workspace_id = workspaceId -- caller wrote this; strict mode checks it
-  AND projects.workspace_id = workspaceId -- wrapper injects this again
+  AND projects.workspace_id = workspaceId -- caller wrote this; strict mode checks the scope column is mentioned
+  AND projects.workspace_id = workspaceId -- wrapper injects this authoritative guard
 ```
 
-The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget it, then the wrapper injects its own copy as a backstop. The duplicate is redundant in the SQL and costs nothing; what it buys is a thrown error instead of a silent cross-scope read when someone forgets the predicate.
+The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget to mention the scope context, then the wrapper injects its own authoritative copy as a backstop. The duplicate is redundant in the SQL and costs nothing; what it buys is a thrown error instead of a silent cross-scope read when someone forgets the predicate.
 
 Application code that should be scoped should receive the scoped DB handle, not the raw Drizzle instance.
 
@@ -252,9 +252,11 @@ With either shape, the wrapper can scope root tables and joined tables with rule
 
 ## Strict mode
 
-Strict mode is enabled by default and intended for most app code. Scoped selects, updates, deletes, and relational queries must include a `where` clause with the declared scope predicate.
+Strict mode is enabled by default and intended for most app code. Scoped selects, updates, deletes, and relational queries must include a `where` clause with the declared scope context.
 
-Callers write the scope predicate, the wrapper verifies it, then injects it again. If generated code, agent-authored code, or a rushed refactor forgets the predicate, the query throws.
+For `scopeByColumn(...)`, strict validation is intentionally syntactic: it checks that the scoped table's column appears in the caller predicate (or that the RQBv2 object filter contains the scoped property, including under `AND` / `OR` / `NOT`). It does not prove the operator is equality or that the compared value is the active scope value. The wrapper's injected predicate is the authoritative runtime guard.
+
+Callers write the scope predicate, the wrapper verifies scope context is present, then injects its own predicate. If generated code, agent-authored code, or a rushed refactor omits scope context entirely, the query throws.
 
 ```ts
 const workspaceDb = createScopedDb(db, {
@@ -274,6 +276,10 @@ await workspaceDb
   .select()
   .from(projects)
   .where(and(eq(projects.id, projectId), eq(projects.workspaceId, workspaceId)));
+
+// Also passes strict validation because the scope column is mentioned, but the
+// injected `eq(projects.workspaceId, workspaceId)` guard is what enforces scope.
+await workspaceDb.select().from(projects).where(ne(projects.workspaceId, workspaceId));
 ```
 
 The predicate must sit on the scoped table itself: filtering a joined table's same-named column (e.g. `eq(tasks.workspaceId, workspaceId)` while selecting `projects`) does not satisfy the check. Aliases of scoped tables are rejected unless the alias has its own explicit scoped rule, so an alias cannot silently bypass rule lookup.

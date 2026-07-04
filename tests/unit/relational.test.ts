@@ -228,6 +228,37 @@ describe("createScopedDb relational query guardrails", () => {
     });
   });
 
+  it("documents syntactic RQBv2 object-filter validation under logical operators", async () => {
+    const state: { relationalObjectWhere?: unknown } = {};
+    const rawDb = {
+      ...createFakeDb(),
+      query: { projects: new FakeRqbV2TableQuery(state) },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: true,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { queryName: "projects" })],
+    });
+
+    await scopedDb.query.projects.findMany({
+      where: { OR: [{ workspaceId: "workspace-2" }, { id: "project-2" }] },
+    });
+    expect(state.relationalObjectWhere).toEqual({
+      AND: [
+        { OR: [{ workspaceId: "workspace-2" }, { id: "project-2" }] },
+        { workspaceId: "workspace-1" },
+      ],
+    });
+
+    await scopedDb.query.projects.findMany({
+      where: { NOT: { workspaceId: "workspace-2" } },
+    });
+    expect(state.relationalObjectWhere).toEqual({
+      AND: [{ NOT: { workspaceId: "workspace-2" } }, { workspaceId: "workspace-1" }],
+    });
+  });
+
   it("rejects RQBv2 callback/SQL where shapes and custom rules without object-filter support", async () => {
     const state: { relationalObjectWhere?: unknown } = {};
     const rawDb = {
