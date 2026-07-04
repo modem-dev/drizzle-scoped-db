@@ -12,6 +12,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
+- Document strict-mode validation as syntactic scope-context detection, with regression coverage that the injected predicate remains the authoritative runtime guard.
+
 ### Fixed
 
 - Block scoped mutation and insert result proxies from forwarding unknown raw Drizzle builder methods, preventing post-scope builder escapes such as PostgreSQL update `.from(...).where(...)` from overwriting injected scope predicates.

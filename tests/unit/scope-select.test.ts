@@ -1,3 +1,5 @@
+import { isNotNull, ne, sql } from "drizzle-orm";
+
 import {
   and,
   eq,
@@ -94,6 +96,28 @@ describe("createScopedDb select guardrails", () => {
     expect(() =>
       scopedDb.select().from(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1")),
     ).not.toThrow();
+  });
+
+  it("treats strict SQL predicate validation as a syntactic scope-column mention", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+
+    const misleadingPredicates = [
+      ne(projectsTbl.workspaceId, "workspace-1"),
+      isNotNull(projectsTbl.workspaceId),
+      sql`${projectsTbl.workspaceId}`,
+    ];
+
+    for (const predicate of misleadingPredicates) {
+      scopedDb.select().from(projectsTbl).where(predicate);
+
+      expect(rawDb._state.selectCondition).toBeDefined();
+      expect(countColumnReferences(rawDb._state.selectCondition, "workspace_id")).toBe(2);
+    }
   });
 
   it("injects scope predicates for joined tables with declared rules", () => {
@@ -306,3 +330,28 @@ describe("createScopedDb select guardrails", () => {
     expect(rawDb._state.havingCondition).toBe(havingCondition);
   });
 });
+
+function countColumnReferences(condition: SQL | undefined, columnName: string): number {
+  const chunks = (condition as { queryChunks?: unknown[] } | undefined)?.queryChunks;
+  return Array.isArray(chunks) ? countColumnReferencesInChunks(chunks, columnName) : 0;
+}
+
+function countColumnReferencesInChunks(chunks: unknown[], columnName: string): number {
+  let count = 0;
+
+  for (const chunk of chunks) {
+    if (!chunk || typeof chunk !== "object") {
+      continue;
+    }
+
+    if ("name" in chunk && chunk.name === columnName) {
+      count += 1;
+    }
+
+    if ("queryChunks" in chunk && Array.isArray(chunk.queryChunks)) {
+      count += countColumnReferencesInChunks(chunk.queryChunks, columnName);
+    }
+  }
+
+  return count;
+}
