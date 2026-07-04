@@ -54,7 +54,7 @@ function wrapScopedInsertResult<TScope, TTable extends ScopedTable, TResult exte
           return typeof value === "function" ? value.bind(raw) : value;
         }
 
-        if (property === "$returningId" && typeof value === "function") {
+        if ((property === "$returningId" || property === "run") && typeof value === "function") {
           return value.bind(raw);
         }
 
@@ -245,6 +245,10 @@ function createScopedMutationResult<TRaw>(rawResult: TRaw): ScopedMutationResult
 
         if (property === "returning" && typeof value === "function") {
           return (...args: unknown[]) => createScopedMutationResult(value.apply(rawResult, args));
+        }
+
+        if (property === "run" && typeof value === "function") {
+          return value.bind(rawResult);
         }
 
         if (typeof value === "function") {

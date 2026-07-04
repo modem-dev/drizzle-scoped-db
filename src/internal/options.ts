@@ -16,7 +16,7 @@ export type DrizzleLikeDb = {
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle method overloads are dialect- and table-specific.
   delete: (...args: any[]) => any;
   // oxlint-disable-next-line typescript/no-explicit-any -- Transaction callback receives driver-specific transaction types.
-  transaction: <T>(callback: (tx: any) => Promise<T>) => Promise<T>;
+  transaction: <T>(callback: (tx: any) => T | Promise<T>) => T | Promise<T>;
   // oxlint-disable-next-line typescript/no-explicit-any -- Execute arguments are driver-specific.
   execute?: (...args: any[]) => unknown;
 };

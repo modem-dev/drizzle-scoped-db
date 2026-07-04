@@ -1,4 +1,9 @@
-import type { CreateScopedDbOptions, ScopedDb, ScopedTable } from "./types.js";
+import type {
+  CreateScopedDbOptions,
+  ScopedDb,
+  ScopedTable,
+  ScopedTransactionCallbackResult,
+} from "./types.js";
 import {
   createScopedDeleteBuilder,
   createScopedInsertBuilder,
@@ -123,12 +128,18 @@ function createScopedDbInternal<
 
     query: queryProxy,
 
-    async transaction<T>(
+    transaction<T>(
       callback: (
         tx: ScopedDb<TDb, TScope, TExtensions, TUnscopedDbPropertyName, TScopeValuePropertyName>,
-      ) => Promise<T>,
+      ) => ScopedTransactionCallbackResult<TDb, T>,
     ): Promise<T> {
-      return dbRecord.transaction(async (tx: TDb) => callback(createScopedDbInternal(tx, options)));
+      try {
+        return Promise.resolve(
+          dbRecord.transaction((tx: TDb) => callback(createScopedDbInternal(tx, options))),
+        );
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
   };
 

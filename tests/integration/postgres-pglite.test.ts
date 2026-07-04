@@ -387,6 +387,69 @@ describe("Postgres/PGlite integration", () => {
     }
   });
 
+  it("executes scoped Postgres inserts and upserts without returning", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      const scopedDb = createScopedPgDb(db);
+
+      await scopedDb.insert(pgProjects).values({
+        id: "project-1",
+        workspaceId: "workspace-1",
+        slug: "project-1",
+        name: "Roadmap",
+      });
+      await scopedDb
+        .insert(pgProjects)
+        .values({
+          id: "project-1",
+          workspaceId: "workspace-1",
+          slug: "project-1-duplicate",
+          name: "Duplicate ignored",
+        })
+        .onConflictDoNothing();
+
+      const rows = await db.select().from(pgProjects).orderBy(pgProjects.id);
+      expect(rows).toEqual([
+        expect.objectContaining({ id: "project-1", name: "Roadmap", workspaceId: "workspace-1" }),
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("injects scope-only predicates for strict-false Postgres bulk updates and deletes", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      const scopedDb = createScopedPgDb(db);
+
+      const updatedRows = await scopedDb
+        .update(pgProjects)
+        .set({ name: "Bulk updated" })
+        .where(undefined)
+        .returning();
+      expect(updatedRows).toEqual([
+        expect.objectContaining({ id: "project-1", name: "Bulk updated" }),
+      ]);
+
+      const [otherWorkspaceAfterUpdate] = await db
+        .select()
+        .from(pgProjects)
+        .where(eq(pgProjects.id, "project-2"));
+      expect(otherWorkspaceAfterUpdate?.name).toBe("Other workspace");
+
+      const deletedRows = await scopedDb.delete(pgProjects).where(undefined).returning();
+      expect(deletedRows).toEqual([expect.objectContaining({ id: "project-1" })]);
+
+      const remainingRows = await db.select().from(pgProjects).orderBy(pgProjects.id);
+      expect(remainingRows).toEqual([
+        expect.objectContaining({ id: "project-2", name: "Other workspace" }),
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
   it("scopes real Postgres updates and deletes and keeps returning results guarded", async () => {
     const db = await createPgIntegrationDb();
     try {
@@ -417,6 +480,9 @@ describe("Postgres/PGlite integration", () => {
         from(table: unknown): { where(condition: unknown): { returning(): unknown } };
       };
       expect(() => updateResult.where(eq(pgProjects.slug, "project-2"))).toThrow();
+      expect(() => (updateResult as unknown as { $dynamic(): unknown }).$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
 
       await db.execute(sql.raw("create table integration_update_markers (id text primary key);"));
       await db.insert(pgUpdateMarkers).values({ id: "marker-1" });
@@ -432,11 +498,47 @@ describe("Postgres/PGlite integration", () => {
         .where(eq(pgProjects.id, "project-2"));
       expect(otherWorkspaceAfterEscapeAttempt?.name).toBe("Other workspace");
 
+      const returnedUpdateResult = scopedDb
+        .update(pgProjects)
+        .set({ name: "Returned guarded" })
+        .where(eq(pgProjects.slug, "project-1"))
+        .returning() as unknown as { where(condition: unknown): unknown; $dynamic(): unknown };
+      expect(() => returnedUpdateResult.where(eq(pgProjects.slug, "project-2"))).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+      expect(() => returnedUpdateResult.$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+
       const deletedRows = await scopedDb
         .delete(pgProjects)
         .where(eq(pgProjects.slug, "project-2"))
         .returning();
       expect(deletedRows).toEqual([]);
+
+      const deleteResult = scopedDb
+        .delete(pgProjects)
+        .where(eq(pgProjects.slug, "project-1")) as unknown as {
+        where(condition: unknown): unknown;
+        $dynamic(): unknown;
+      };
+      expect(() => deleteResult.where(eq(pgProjects.slug, "project-2"))).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+      expect(() => deleteResult.$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+
+      const returnedDeleteResult = scopedDb
+        .delete(pgProjects)
+        .where(eq(pgProjects.slug, "project-2"))
+        .returning() as unknown as { where(condition: unknown): unknown; $dynamic(): unknown };
+      expect(() => returnedDeleteResult.where(eq(pgProjects.slug, "project-1"))).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+      expect(() => returnedDeleteResult.$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
 
       const remainingRows = await db.select().from(pgProjects).orderBy(pgProjects.id);
       expect(remainingRows).toEqual([
@@ -475,7 +577,7 @@ describe("Postgres/PGlite integration", () => {
         .where(eq(pgProjects.id, "project-2"));
       expect(otherWorkspaceRow?.name).toBe("Other workspace");
 
-      const scopedRows = await scopedDb
+      const scopedUpsertResult = scopedDb
         .insert(pgProjects)
         .values({
           id: "project-1",
@@ -487,8 +589,25 @@ describe("Postgres/PGlite integration", () => {
           target: pgProjects.id,
           set: { name: "Scoped upsert" },
           setWhere: eq(pgProjects.name, "Roadmap"),
+        });
+      expect(() =>
+        (scopedUpsertResult as unknown as { where(condition: unknown): unknown }).where(
+          eq(pgProjects.id, "project-2"),
+        ),
+      ).toThrow();
+      expect(() => (scopedUpsertResult as unknown as { $dynamic(): unknown }).$dynamic()).toThrow();
+      const unsafeInsertBuilder = scopedDb
+        .insert(pgProjects)
+        .values({
+          id: "project-unsafe",
+          workspaceId: "workspace-1",
+          slug: "project-unsafe",
+          name: "Unsafe escape probe",
         })
-        .returning();
+        .$unsafeUnscoped() as { onConflictDoUpdate?: unknown };
+      expect(typeof unsafeInsertBuilder.onConflictDoUpdate).toBe("function");
+
+      const scopedRows = await scopedUpsertResult.returning();
       expect(scopedRows).toEqual([
         expect.objectContaining({ id: "project-1", name: "Scoped upsert" }),
       ]);
@@ -512,20 +631,41 @@ describe("Postgres/PGlite integration", () => {
           .update(pgProjects)
           .set({ name: "Cross-scope tx attempt" })
           .where(eq(pgProjects.id, "project-2"));
+        await tx.insert(pgProjects).values({
+          id: "project-3",
+          workspaceId: "workspace-1",
+          slug: "project-3",
+          name: "Inserted in tx",
+        });
+        const crossScopeUpsertRows = await tx
+          .insert(pgProjects)
+          .values({
+            id: "project-2",
+            workspaceId: "workspace-1",
+            slug: "project-2-tx-upsert",
+            name: "Cross-scope tx upsert",
+          })
+          .onConflictDoUpdate({
+            target: pgProjects.id,
+            set: { name: "Cross-scope tx upsert" },
+          })
+          .returning();
+        expect(crossScopeUpsertRows).toEqual([]);
       });
 
       const rows = await db.select().from(pgProjects).orderBy(pgProjects.id);
       expect(rows).toEqual([
         expect.objectContaining({ id: "project-1", name: "Updated in tx" }),
         expect.objectContaining({ id: "project-2", name: "Other workspace" }),
+        expect.objectContaining({ id: "project-3", name: "Inserted in tx" }),
       ]);
 
       await expect(
         scopedDb.transaction(async (tx) => {
           await tx.insert(pgProjects).values({
-            id: "project-3",
+            id: "project-4",
             workspaceId: "workspace-1",
-            slug: "project-3",
+            slug: "project-4",
             name: "Rolled back",
           });
           await tx._unsafeUnscopedDb.execute(sql`select boom from missing_table`);
@@ -535,8 +675,31 @@ describe("Postgres/PGlite integration", () => {
       const rolledBackRows = await db
         .select()
         .from(pgProjects)
-        .where(eq(pgProjects.id, "project-3"));
+        .where(eq(pgProjects.id, "project-4"));
       expect(rolledBackRows).toEqual([]);
+
+      await expect(
+        scopedDb.transaction(async (tx) => {
+          await tx.insert(pgProjects).values({
+            id: "project-5",
+            workspaceId: "workspace-1",
+            slug: "project-5",
+            name: "Rolled back before invalid insert",
+          });
+          tx.insert(pgProjects).values({
+            id: "project-6",
+            workspaceId: "workspace-2",
+            slug: "project-6",
+            name: "Invalid tx insert",
+          });
+        }),
+      ).rejects.toThrow(InvalidScopedInsertError);
+
+      const invalidInsertRollbackRows = await db
+        .select()
+        .from(pgProjects)
+        .where(eq(pgProjects.id, "project-5"));
+      expect(invalidInsertRollbackRows).toEqual([]);
     } finally {
       await closePgIntegrationDb(db);
     }

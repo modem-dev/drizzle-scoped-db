@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { alias as sqliteAlias } from "drizzle-orm/sqlite-core";
 
 import {
@@ -263,6 +263,72 @@ describe("SQLite/sql.js integration", () => {
     }
   });
 
+  it("executes scoped SQLite inserts and upserts without returning", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      const scopedDb = createScopedSqliteDb(harness.db);
+
+      await scopedDb.insert(sqliteProjects).values({
+        id: "project-1",
+        workspaceId: "workspace-1",
+        slug: "project-1",
+        name: "Roadmap",
+      });
+      await scopedDb
+        .insert(sqliteProjects)
+        .values({
+          id: "project-1",
+          workspaceId: "workspace-1",
+          slug: "project-1-duplicate",
+          name: "Duplicate ignored",
+        })
+        .onConflictDoNothing();
+
+      const rows = await harness.db.select().from(sqliteProjects).orderBy(sqliteProjects.id);
+      expect(rows).toEqual([
+        expect.objectContaining({ id: "project-1", name: "Roadmap", workspaceId: "workspace-1" }),
+      ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("injects scope-only predicates for strict-false SQLite bulk updates and deletes", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      const scopedDb = createScopedSqliteDb(harness.db);
+
+      const updatedRows = await scopedDb
+        .update(sqliteProjects)
+        .set({ name: "Bulk updated" })
+        .where(undefined)
+        .returning();
+      expect(updatedRows).toEqual([
+        expect.objectContaining({ id: "project-1", name: "Bulk updated" }),
+      ]);
+
+      const [otherWorkspaceAfterUpdate] = await harness.db
+        .select()
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.id, "project-2"));
+      expect(otherWorkspaceAfterUpdate?.name).toBe("Other workspace");
+
+      const deletedRows = await scopedDb.delete(sqliteProjects).where(undefined).returning();
+      expect(deletedRows).toEqual([expect.objectContaining({ id: "project-1" })]);
+
+      const remainingRows = await harness.db
+        .select()
+        .from(sqliteProjects)
+        .orderBy(sqliteProjects.id);
+      expect(remainingRows).toEqual([
+        expect.objectContaining({ id: "project-2", name: "Other workspace" }),
+      ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
   it("scopes real SQLite updates and deletes and keeps returning results guarded", async () => {
     const harness = await createSqliteIntegrationDb();
     try {
@@ -292,12 +358,51 @@ describe("SQLite/sql.js integration", () => {
         where(condition: unknown): unknown;
       };
       expect(() => updateResult.where(eq(sqliteProjects.slug, "project-2"))).toThrow();
+      expect(() => (updateResult as unknown as { $dynamic(): unknown }).$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+
+      const returnedUpdateResult = scopedDb
+        .update(sqliteProjects)
+        .set({ name: "Returned guarded" })
+        .where(eq(sqliteProjects.slug, "project-1"))
+        .returning() as unknown as { where(condition: unknown): unknown; $dynamic(): unknown };
+      expect(() => returnedUpdateResult.where(eq(sqliteProjects.slug, "project-2"))).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+      expect(() => returnedUpdateResult.$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
 
       const deletedRows = await scopedDb
         .delete(sqliteProjects)
         .where(eq(sqliteProjects.slug, "project-2"))
         .returning();
       expect(deletedRows).toEqual([]);
+
+      const deleteResult = scopedDb
+        .delete(sqliteProjects)
+        .where(eq(sqliteProjects.slug, "project-1")) as unknown as {
+        where(condition: unknown): unknown;
+        $dynamic(): unknown;
+      };
+      expect(() => deleteResult.where(eq(sqliteProjects.slug, "project-2"))).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+      expect(() => deleteResult.$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+
+      const returnedDeleteResult = scopedDb
+        .delete(sqliteProjects)
+        .where(eq(sqliteProjects.slug, "project-2"))
+        .returning() as unknown as { where(condition: unknown): unknown; $dynamic(): unknown };
+      expect(() => returnedDeleteResult.where(eq(sqliteProjects.slug, "project-1"))).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
+      expect(() => returnedDeleteResult.$dynamic()).toThrow(
+        "Scoped mutation results do not expose raw query-builder chaining.",
+      );
 
       const remainingRows = await harness.db
         .select()
@@ -339,7 +444,7 @@ describe("SQLite/sql.js integration", () => {
         .where(eq(sqliteProjects.id, "project-2"));
       expect(otherWorkspaceRow?.name).toBe("Other workspace");
 
-      const scopedRows = await scopedDb
+      const scopedUpsertResult = scopedDb
         .insert(sqliteProjects)
         .values({
           id: "project-1",
@@ -351,8 +456,25 @@ describe("SQLite/sql.js integration", () => {
           target: sqliteProjects.id,
           set: { name: "Scoped upsert" },
           setWhere: eq(sqliteProjects.name, "Roadmap"),
+        });
+      expect(() =>
+        (scopedUpsertResult as unknown as { where(condition: unknown): unknown }).where(
+          eq(sqliteProjects.id, "project-2"),
+        ),
+      ).toThrow();
+      expect(() => (scopedUpsertResult as unknown as { $dynamic(): unknown }).$dynamic()).toThrow();
+      const unsafeInsertBuilder = scopedDb
+        .insert(sqliteProjects)
+        .values({
+          id: "project-unsafe",
+          workspaceId: "workspace-1",
+          slug: "project-unsafe",
+          name: "Unsafe escape probe",
         })
-        .returning();
+        .$unsafeUnscoped() as { onConflictDoUpdate?: unknown };
+      expect(typeof unsafeInsertBuilder.onConflictDoUpdate).toBe("function");
+
+      const scopedRows = await scopedUpsertResult.returning();
       expect(scopedRows).toEqual([
         expect.objectContaining({ id: "project-1", name: "Scoped upsert" }),
       ]);
@@ -367,22 +489,83 @@ describe("SQLite/sql.js integration", () => {
       await seedSqliteProjects(harness.db);
       const scopedDb = createScopedSqliteDb(harness.db);
 
-      await scopedDb.transaction(async (tx) => {
-        await tx
-          .update(sqliteProjects)
+      await scopedDb.transaction((tx) => {
+        tx.update(sqliteProjects)
           .set({ name: "Updated in tx" })
-          .where(eq(sqliteProjects.id, "project-1"));
-        await tx
-          .update(sqliteProjects)
+          .where(eq(sqliteProjects.id, "project-1"))
+          .run();
+        tx.update(sqliteProjects)
           .set({ name: "Cross-scope tx attempt" })
-          .where(eq(sqliteProjects.id, "project-2"));
+          .where(eq(sqliteProjects.id, "project-2"))
+          .run();
+        tx.insert(sqliteProjects)
+          .values({
+            id: "project-3",
+            workspaceId: "workspace-1",
+            slug: "project-3",
+            name: "Inserted in tx",
+          })
+          .run();
+        tx.insert(sqliteProjects)
+          .values({
+            id: "project-2",
+            workspaceId: "workspace-1",
+            slug: "project-2-tx-upsert",
+            name: "Cross-scope tx upsert",
+          })
+          .onConflictDoUpdate({
+            target: sqliteProjects.id,
+            set: { name: "Cross-scope tx upsert" },
+          })
+          .run();
       });
 
       const rows = await harness.db.select().from(sqliteProjects).orderBy(sqliteProjects.id);
       expect(rows).toEqual([
         expect.objectContaining({ id: "project-1", name: "Updated in tx" }),
         expect.objectContaining({ id: "project-2", name: "Other workspace" }),
+        expect.objectContaining({ id: "project-3", name: "Inserted in tx" }),
       ]);
+
+      await expect(
+        scopedDb.transaction((tx) => {
+          (tx._unsafeUnscopedDb as { run(query: unknown): unknown }).run(
+            sql.raw(
+              "insert into integration_projects (id, workspace_id, slug, name) values ('project-4', 'workspace-1', 'project-4', 'Rolled back')",
+            ),
+          );
+          throw new Error("rollback sqlite transaction");
+        }),
+      ).rejects.toThrow("rollback sqlite transaction");
+
+      const rolledBackRows = await harness.db
+        .select()
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.id, "project-4"));
+      expect(rolledBackRows).toEqual([]);
+
+      await expect(
+        scopedDb.transaction((tx) => {
+          (tx._unsafeUnscopedDb as { run(query: unknown): unknown }).run(
+            sql.raw(
+              "insert into integration_projects (id, workspace_id, slug, name) values ('project-5', 'workspace-1', 'project-5', 'Rolled back before invalid insert')",
+            ),
+          );
+          tx.insert(sqliteProjects).values({
+            id: "project-6",
+            workspaceId: "workspace-2",
+            slug: "project-6",
+            name: "Invalid tx insert",
+          });
+          return "unreachable";
+        }),
+      ).rejects.toThrow(InvalidScopedInsertError);
+
+      const invalidInsertRollbackRows = await harness.db
+        .select()
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.id, "project-5"));
+      expect(invalidInsertRollbackRows).toEqual([]);
     } finally {
       closeSqliteIntegrationDb(harness);
     }
