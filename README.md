@@ -93,7 +93,7 @@ WHERE projects.id = projectId
   AND projects.workspace_id = workspaceId -- wrapper injects this authoritative guard
 ```
 
-The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget to mention the scope context, then the wrapper injects its own authoritative copy as a backstop. The duplicate is redundant in the SQL and costs nothing; what it buys is a thrown error instead of a silent cross-scope read when someone forgets the predicate.
+The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget to mention the scope context, then the wrapper injects its own authoritative copy as a backstop. The duplicate is redundant SQL that databases usually optimize well; what it buys is a thrown error instead of a silent cross-scope read when someone forgets the predicate.
 
 Application code that should be scoped should receive the scoped DB handle, not the raw Drizzle instance.
 
@@ -177,7 +177,7 @@ Batch inserts are validated row by row.
 
 ## Update and delete
 
-Scoped predicates are injected into mutations too.
+Scoped predicates are injected into mutations too. When `insertKey` is configured, `scopeByColumn` also validates update payloads by default (override with `updateKey` if the update field differs).
 
 ```ts
 await workspaceDb
@@ -188,11 +188,19 @@ await workspaceDb
 await workspaceDb
   .delete(tasks)
   .where(and(eq(tasks.id, taskId), eq(tasks.workspaceId, workspaceId)));
+
+// Throws InvalidScopedUpdateError: scoped rows cannot be moved across scopes.
+await workspaceDb
+  .update(tasks)
+  .set({ workspaceId: "another-workspace" })
+  .where(and(eq(tasks.id, taskId), eq(tasks.workspaceId, workspaceId)));
 ```
 
 ## Relational query API
 
 Declare `queryName` to scope `db.query.<name>.findFirst` and `findMany`.
+
+Older Drizzle relational queries use callback-style `where` clauses:
 
 ```ts
 const workspaceDb = createScopedDb(db, {
@@ -212,7 +220,15 @@ const project = await workspaceDb.query.projects.findFirst({
 });
 ```
 
-Tables without a matching rule pass through unchanged for plain root `findFirst` / `findMany` calls. When any relational scoped rule is configured, relational `with` includes fail closed because nested relation rows cannot yet be scoped safely by the wrapper. Use explicit scoped joins or separate scoped queries for related rows.
+Drizzle 1.0's RQBv2 API uses object filters instead. `scopeByColumn` configures the object-filter guard automatically when it can resolve the column's TypeScript property key:
+
+```ts
+const project = await workspaceDb.query.projects.findFirst({
+  where: { AND: [{ id: projectId }, { workspaceId }] },
+});
+```
+
+On RQBv2 scoped roots, callback or SQL `where` shapes are rejected so Drizzle cannot ignore them. Tables without a matching rule pass through for plain root `findFirst` / `findMany` calls, except that when any relational scoped rule is configured, relational `with` includes fail closed because nested relation rows cannot yet be scoped safely by the wrapper. Use explicit scoped joins or separate scoped queries for related rows.
 
 ## Data model shape
 
@@ -279,6 +295,7 @@ await workspaceDb
 
 // Also passes strict validation because the scope column is mentioned, but the
 // injected `eq(projects.workspaceId, workspaceId)` guard is what enforces scope.
+// (`ne` is imported from drizzle-orm.)
 await workspaceDb.select().from(projects).where(ne(projects.workspaceId, workspaceId));
 ```
 
@@ -303,7 +320,11 @@ await workspaceDb.select().from(projects).where(eq(projects.id, projectId));
 Use `defineScopedTable` for composite scopes or predicates that are not a single equality column.
 
 ```ts
-import { createScopedDb, defineScopedTable } from "@modemdev/drizzle-scoped-db";
+import {
+  containsColumnFilter,
+  createScopedDb,
+  defineScopedTable,
+} from "@modemdev/drizzle-scoped-db";
 import { and, eq } from "drizzle-orm";
 
 const scopedDb = createScopedDb(db, {
@@ -315,10 +336,18 @@ const scopedDb = createScopedDb(db, {
         and(eq(records.workspaceId, scope.workspaceId), eq(records.regionId, scope.regionId)),
       validateInsert: (row, scope) =>
         row.workspaceId === scope.workspaceId && row.regionId === scope.regionId,
+      validateUpdate: (payload, scope) =>
+        (payload.workspaceId === undefined || payload.workspaceId === scope.workspaceId) &&
+        (payload.regionId === undefined || payload.regionId === scope.regionId),
+      hasScopeInWhere: (condition) =>
+        containsColumnFilter(condition, "workspace_id", records) &&
+        containsColumnFilter(condition, "region_id", records),
     }),
   ],
 });
 ```
+
+`hasScopeInWhere` is required for custom rules when strict mode is enabled. If you want injection-only custom rules, pass `strict: false` to `createScopedDb(...)`. If a rule's SQL `where(scopeValue)` returns `undefined`, SQL-backed scoped selects, joins, updates, deletes, callback relational reads, and guarded upserts fail closed instead of running without the injected predicate.
 
 ## Escape hatches
 
@@ -400,17 +429,17 @@ Expected support:
 
 Currently wrapped:
 
-- `select().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
-- `selectDistinct().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
-- `selectDistinctOn(...).from(table).where(...)` when supported by the driver, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules
+- `select().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules, then `.limit(...)`, `.offset(...)`, `.orderBy(...)`, `.groupBy(...)`, and `.having(...)`
+- `selectDistinct().from(table).where(...)`, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules, then the same post-`where` chaining methods
+- `selectDistinctOn(...).from(table).where(...)` when supported by the driver, including `.leftJoin(...)` / `.innerJoin(...)` tables with rules, then the same post-`where` chaining methods
 - `insert(table).values(...)`, plus `.returning(...)`, `.$returningId()`, `.onConflictDoNothing(...)`, safe `.onConflictDoUpdate(...)` when supported, and `.$unsafeUnscoped()` for raw continuation
-- `update(table).set(...).where(...)`
-- `delete(table).where(...)`
+- `update(table).set(...).where(...)`, plus `.returning(...)` and `.run()` when supported by the driver
+- `delete(table).where(...)`, plus `.returning(...)` and `.run()` when supported by the driver
 - `query.<queryName>.findFirst(...)`
 - `query.<queryName>.findMany(...)`
 - `transaction(...)`, with a scoped transaction DB passed to the callback
 
-Tables without rules and unwrapped APIs pass through to the underlying Drizzle instance.
+Tables without rules are not scoped: inserts, updates, and deletes return the underlying Drizzle builders, while selects still use the narrow facade but inject no predicate for an unruled root table. Unwrapped APIs are intentionally absent; use `_unsafeUnscopedDb` for raw Drizzle access.
 
 ## API
 
@@ -461,6 +490,14 @@ type ScopedTableRule<
   hasScopeInConflictTarget?: (target: unknown) => boolean;
   // Required when createScopedDb({ strict: true }) is enabled.
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
+  relational?: {
+    rqbV2?: {
+      // Object filter injected into Drizzle 1.0 RQBv2 relational find queries.
+      where: (scopeValue: TScope) => Record<string, unknown> | undefined;
+      // Strict-mode detector for RQBv2 object filters.
+      hasScopeInWhere?: (condition: unknown) => boolean;
+    };
+  };
 };
 ```
 
