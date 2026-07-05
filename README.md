@@ -93,7 +93,7 @@ WHERE projects.id = projectId
   AND projects.workspace_id = workspaceId -- wrapper injects this authoritative guard
 ```
 
-The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget to mention the scope context, then the wrapper injects its own authoritative copy as a backstop. The duplicate is redundant SQL that databases usually optimize well; what it buys is a thrown error instead of a silent cross-scope read when someone forgets the predicate.
+The predicate appears twice on purpose. You write it so the boundary is visible in code review and type-checked by TypeScript. Strict mode verifies you didn't forget to mention the scope context, then the wrapper injects its own authoritative copy as a backstop. The duplicate is redundant SQL that costs basically nothing in practice; what it buys is a thrown error instead of a silent cross-scope read when someone forgets the predicate.
 
 Application code that should be scoped should receive the scoped DB handle, not the raw Drizzle instance.
 
