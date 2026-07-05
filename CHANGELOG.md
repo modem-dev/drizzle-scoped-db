@@ -4,6 +4,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-04
+
 ### Added
 
 - Add real-driver PostgreSQL and SQLite integration coverage for scoped joins, including joined-table scope predicates, left-join outer-row preservation, unscoped roots joined to scoped tables, and fail-closed joined aliases.
