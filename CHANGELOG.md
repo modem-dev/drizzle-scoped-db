@@ -4,6 +4,10 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Deprecate the legacy `hasScopeInConflictTarget` rule hook in favor of scoped upsert `setWhere` guards, and simplify the README API docs by moving advanced wrapper options out of the primary path.
+
 ## [0.12.0] - 2026-07-04
 
 ### Added

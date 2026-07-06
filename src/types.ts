@@ -42,7 +42,11 @@ export type ScopedTableRule<
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
   /** Optional update payload validator. Return true only when the updated fields are valid for scopeValue. */
   validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
-  /** Legacy conflict-target detector retained for compatibility; the scoped upsert path no longer consults it. */
+  /**
+   * @deprecated Legacy conflict-target detector retained for compatibility. Scoped upsert safety now
+   * comes from validating the update payload and injecting the rule's scope predicate into `setWhere`;
+   * the scoped upsert path no longer consults this detector.
+   */
   hasScopeInConflictTarget?: (target: unknown) => boolean;
   /**
    * Optional strict-mode validator for checking whether user-supplied where already includes scope.

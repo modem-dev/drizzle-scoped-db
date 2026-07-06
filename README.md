@@ -451,12 +451,23 @@ type CreateScopedDbOptions<TScope> = {
   scopeValue: TScope;
   rules: ScopedTableRule<TScope>[];
   strict?: boolean; // defaults to true
+};
+```
+
+Most apps only need those options.
+
+#### Advanced options
+
+Advanced wrapper customization is available when you need it:
+
+```ts
+{
   unscopedDbPropertyName?: string; // defaults to '_unsafeUnscopedDb'
   scopeValueProperty?: string;
   toJSON?: (scopeValue: TScope, scopeName: string) => unknown;
   extensions?: (scopeValue: TScope, scopeName: string) => Record<string, unknown>;
   errors?: ScopedDbErrors<TScope>;
-};
+}
 ```
 
 ### `scopeByColumn(table, column, options)`
@@ -486,8 +497,6 @@ type ScopedTableRule<
   where: (scopeValue: TScope) => SQL | undefined;
   validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
   validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
-  // Legacy detector retained for compatibility; scoped onConflictDoUpdate no longer consults it.
-  hasScopeInConflictTarget?: (target: unknown) => boolean;
   // Required when createScopedDb({ strict: true }) is enabled.
   hasScopeInWhere?: (condition: SQL | undefined) => boolean;
   relational?: {
@@ -526,7 +535,7 @@ If a Drizzle upgrade changes the internal SQL chunk shape, this fails fast inste
 - `InvalidScopedUpdateError`
 - `InvalidScopedConflictTargetError`
 
-You can replace these with custom error factories in `createScopedDb({ errors })`.
+You can replace these with custom error factories through the advanced `createScopedDb({ errors })` option.
 
 ## Development
 
