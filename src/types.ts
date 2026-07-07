@@ -43,12 +43,6 @@ export type ScopedTableRule<
   /** Optional update payload validator. Return true only when the updated fields are valid for scopeValue. */
   validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
   /**
-   * @deprecated Legacy conflict-target detector retained for compatibility. Scoped upsert safety now
-   * comes from validating the update payload and injecting the rule's scope predicate into `setWhere`;
-   * the scoped upsert path no longer consults this detector.
-   */
-  hasScopeInConflictTarget?: (target: unknown) => boolean;
-  /**
    * Optional strict-mode validator for checking whether user-supplied where already includes scope.
    * Required when `strict` mode is enabled; rules without a detector fail strict validation.
    */
