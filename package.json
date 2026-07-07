@@ -1,6 +1,6 @@
 {
   "name": "@modemdev/drizzle-scoped-db",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Typed tenant scoping for Drizzle ORM query builders",
   "keywords": [
     "drizzle",
