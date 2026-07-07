@@ -455,12 +455,12 @@ export type ScopeByColumnOptions<TScope> = {
   queryName?: string;
   /** Human-readable table name used in errors. */
   tableName?: string;
-  /** Insert row property that should equal the current scope value. */
-  insertKey?: string;
-  /** Update payload property that should equal the current scope value if present. Defaults to `insertKey`. */
-  updateKey?: string;
+  /** Insert row property that should equal the current scope value. Defaults to the column's table key; false disables. */
+  insertKey?: string | false;
+  /** Update payload property that should equal the current scope value if present. Defaults to `insertKey`; false disables. */
+  updateKey?: string | false;
   /** SQL column name used by strict validation. Defaults to the Drizzle column name. */
   columnName?: string;
-  /** Custom equality function for insert validation. Defaults to Object.is. */
+  /** Custom equality function for insert/update validation. Defaults to Object.is. */
   equals?: (rowValue: unknown, scopeValue: TScope) => boolean;
 };

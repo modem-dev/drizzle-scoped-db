@@ -126,10 +126,7 @@ import { projects, tasks } from "./schema";
 const workspaceDb = createScopedDb(db, {
   scopeName: "workspace",
   scopeValue: workspaceId,
-  rules: [
-    scopeByColumn(projects, projects.workspaceId, { insertKey: "workspaceId" }),
-    scopeByColumn(tasks, tasks.workspaceId, { insertKey: "workspaceId" }),
-  ],
+  rules: [scopeByColumn(projects, projects.workspaceId), scopeByColumn(tasks, tasks.workspaceId)],
 });
 
 const project = await workspaceDb
@@ -156,7 +153,7 @@ const rows = await workspaceDb
 
 ## Insert validation
 
-When `insertKey` is provided, inserted rows must match the current scope value.
+For `scopeByColumn(table, table.scopeColumn)`, inserted rows are validated against the current scope value by default. The rule infers the insert payload key from the table property that owns the column.
 
 ```ts
 await workspaceDb.insert(projects).values({
@@ -175,9 +172,11 @@ await workspaceDb.insert(projects).values({
 
 Batch inserts are validated row by row.
 
+You usually do not need `insertKey`: Drizzle insert payloads use the table property key (`workspaceId`) even when the SQL column is named `workspace_id`. Keep `insertKey` for advanced wrappers or unusual column objects where the payload key cannot be inferred, or pass `insertKey: false` to disable insert payload validation explicitly.
+
 ## Update and delete
 
-Scoped predicates are injected into mutations too. When `insertKey` is configured, `scopeByColumn` also validates update payloads by default (override with `updateKey` if the update field differs).
+Scoped predicates are injected into mutations too. `scopeByColumn` validates update payloads by default using the same inferred table property key. Pass `updateKey: false` only for deliberate scope-moving flows, such as an admin transfer that reassigns a row to another workspace.
 
 ```ts
 await workspaceDb
@@ -206,12 +205,7 @@ Older Drizzle relational queries use callback-style `where` clauses:
 const workspaceDb = createScopedDb(db, {
   scopeName: "workspace",
   scopeValue: workspaceId,
-  rules: [
-    scopeByColumn(projects, projects.workspaceId, {
-      queryName: "projects",
-      insertKey: "workspaceId",
-    }),
-  ],
+  rules: [scopeByColumn(projects, projects.workspaceId, { queryName: "projects" })],
 });
 
 const project = await workspaceDb.query.projects.findFirst({
@@ -245,9 +239,9 @@ Explicit rules:
 
 ```ts
 const rules = [
-  scopeByColumn(projects, projects.workspaceId, { insertKey: "workspaceId" }),
-  scopeByColumn(tasks, tasks.workspaceId, { insertKey: "workspaceId" }),
-  scopeByColumn(comments, comments.workspaceId, { insertKey: "workspaceId" }),
+  scopeByColumn(projects, projects.workspaceId),
+  scopeByColumn(tasks, tasks.workspaceId),
+  scopeByColumn(comments, comments.workspaceId),
 ];
 ```
 
@@ -256,12 +250,7 @@ Generated rules:
 ```ts
 const tenantScopedRules = Object.values(schema)
   .filter((table) => isDrizzleTable(table) && "tenantId" in table)
-  .map((table) =>
-    scopeByColumn(table, table.tenantId, {
-      insertKey: "tenantId",
-      columnName: "tenant_id",
-    }),
-  );
+  .map((table) => scopeByColumn(table, table.tenantId, { columnName: "tenant_id" }));
 ```
 
 With either shape, the wrapper can scope root tables and joined tables with rules. Your schema still owns data consistency, such as preventing a task in one scope from referencing another scope's project.
@@ -352,7 +341,11 @@ const visibleDb = createScopedDb(db, {
 });
 ```
 
-Pass an array to `scopeByPredicate(...)` when multiple arbitrary predicates should be ANDed together. `strictColumns` tells strict mode which columns must appear in the caller predicate; the wrapper's `where(...)` remains the authoritative injected guard. If a predicate cannot be represented with `scopeByColumn` or `scopeByPredicate`, use an explicit unsafe escape and keep the bespoke query local.
+Pass an array to `scopeByPredicate(...)` when multiple arbitrary predicates should be ANDed together. `strictColumns` tells strict mode which columns must appear in the caller predicate; the wrapper's `where(...)` remains the authoritative injected guard.
+
+Predicate rules intentionally do not infer insert/update payload validation: a predicate may be non-equality (`isNull(deletedAt)`), constant (`published = true`), or an arbitrary SQL expression with no single payload field to compare. Use `scopeByColumn(...)` when mutation payloads should be validated against scope values; use an explicit unsafe escape and keep the bespoke query local when a predicate-only rule needs custom mutation semantics.
+
+If a predicate cannot be represented with `scopeByColumn` or `scopeByPredicate`, use an explicit unsafe escape and keep the bespoke query local.
 
 ## Escape hatches
 
@@ -371,7 +364,7 @@ workspaceDb
 
 The wrapper forwards your `target`, `set`, and `targetWhere`, and auto-injects the rule's scope predicate into `setWhere`. If a conflict points at a row from another scope, the `DO UPDATE ... WHERE scope = value` guard is false, so the conflict safely no-ops instead of updating or inserting.
 
-For `scopeByColumn`, this works when `insertKey` is configured; that validates `.values(...)` and also validates `set` payloads unless you override the update field with `updateKey`. Composite `scopeByColumn` maps derive insert/update validation from their column map. Predicate-only rules from `scopeByPredicate` do not validate mutation payloads, so use the unsafe escape for upserts that need bespoke predicate semantics.
+For `scopeByColumn`, this works when the rule has insert/update payload validators. The single-column form infers those validators from the table property key by default; override with `insertKey` / `updateKey`, or pass `false` to disable one. Composite `scopeByColumn` maps derive insert/update validation from their column map. Predicate-only rules from `scopeByPredicate` do not validate mutation payloads, so use the unsafe escape for upserts that need bespoke predicate semantics.
 
 When you need deliberate cross-scope writes, use an explicit escape hatch so you (and your agent) can see the audit boundary.
 
@@ -481,10 +474,10 @@ Advanced wrapper customization is available when you need it:
 type ScopeByColumnOptions<TScope> = {
   queryName?: string;
   tableName?: string;
-  insertKey?: string;
-  updateKey?: string; // defaults to insertKey
+  insertKey?: string | false; // advanced override; defaults to the column's table key
+  updateKey?: string | false; // advanced override; defaults to insertKey
   columnName?: string;
-  equals?: (rowValue: unknown, scopeValue: TScope) => boolean;
+  equals?: (rowValue: unknown, scopeValue: TScope) => boolean; // insert/update validation
 };
 ```
 

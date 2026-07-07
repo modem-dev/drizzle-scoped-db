@@ -4,6 +4,10 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Infer `scopeByColumn(table, table.column)` insert/update validation keys from the table property by default, so common single-column rules no longer need `insertKey`; pass `insertKey: false` or `updateKey: false` to disable payload validation explicitly.
+
 ## [0.13.0] - 2026-07-07
 
 ### Breaking changes

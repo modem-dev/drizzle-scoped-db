@@ -23,6 +23,26 @@ describe("scope table rule helpers", () => {
     expect(rule.hasScopeInWhere?.(eq(projectsTbl.id, "project-1"))).toBe(false);
   });
 
+  it("infers insert and update validation keys from single-column table properties", () => {
+    const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId);
+
+    expect(rule.validateInsert?.({ workspaceId: "workspace-1" }, "workspace-1")).toBe(true);
+    expect(rule.validateInsert?.({ workspaceId: "workspace-2" }, "workspace-1")).toBe(false);
+    expect(rule.validateUpdate?.({ workspaceId: "workspace-1" }, "workspace-1")).toBe(true);
+    expect(rule.validateUpdate?.({ workspaceId: "workspace-2" }, "workspace-1")).toBe(false);
+    expect(rule.validateUpdate?.({ name: "Roadmap" }, "workspace-1")).toBe(true);
+  });
+
+  it("allows inferred single-column mutation validation to be disabled", () => {
+    const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+      insertKey: false,
+      updateKey: false,
+    });
+
+    expect(rule.validateInsert).toBeUndefined();
+    expect(rule.validateUpdate).toBeUndefined();
+  });
+
   it("creates composite column rules from one declaration", () => {
     const rule = scopeByColumn<{ workspaceId: string; regionId: string }, typeof projectsTbl>(
       projectsTbl,

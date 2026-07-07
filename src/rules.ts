@@ -1,4 +1,4 @@
-import { and, type Column, eq, type SQL } from "drizzle-orm";
+import { and, type Column, eq, getTableColumns, type SQL } from "drizzle-orm";
 
 import { containsColumnFilter } from "./drizzle-compat.js";
 import { createRqbV2ColumnObjectFilter } from "./internal/relational/rqb-v2-object-filter.js";
@@ -86,16 +86,17 @@ function createSingleColumnRule<TScope, TTable extends ScopedTable>(
 ): ScopedTableRule<TScope, TTable> {
   const columnName = options.columnName ?? getColumnName(column);
   const equals = options.equals ?? Object.is;
-  const updateKey = options.updateKey ?? options.insertKey;
+  const inferredKey = inferColumnKey(table, column, columnName);
+  const insertKey = options.insertKey === false ? undefined : (options.insertKey ?? inferredKey);
+  const updateKey = options.updateKey === false ? undefined : (options.updateKey ?? insertKey);
 
   return {
     table,
     queryName: options.queryName,
     tableName: options.tableName,
     where: (scopeValue) => eq(column as Parameters<typeof eq>[0], scopeValue),
-    validateInsert: options.insertKey
-      ? (row, scopeValue) =>
-          equals((row as Record<string, unknown>)[options.insertKey as string], scopeValue)
+    validateInsert: insertKey
+      ? (row, scopeValue) => equals((row as Record<string, unknown>)[insertKey], scopeValue)
       : undefined,
     validateUpdate: updateKey
       ? (payload, scopeValue) => {
@@ -200,6 +201,23 @@ function normalizeColumnEntry<TScope>(
       }),
     equals: config.equals ?? Object.is,
   };
+}
+
+function inferColumnKey(
+  table: ScopedTable,
+  column: Column,
+  columnName: string,
+): string | undefined {
+  const columns = getTableColumns(table);
+  if (!columns) {
+    return undefined;
+  }
+
+  const matchingKeys = Object.entries(columns)
+    .filter(([, candidate]) => candidate === column || getColumnName(candidate) === columnName)
+    .map(([key]) => key);
+
+  return matchingKeys.length === 1 ? matchingKeys[0] : undefined;
 }
 
 function isColumnEntryConfig<TScope>(

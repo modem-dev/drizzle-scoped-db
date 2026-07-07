@@ -31,12 +31,8 @@ function createScopedPgDb(db: PgIntegrationDb, workspaceId = "workspace-1") {
     scopeValue: workspaceId,
     strict: false,
     rules: [
-      scopeByColumn(pgProjects, pgProjects.workspaceId, {
-        insertKey: "workspaceId",
-      }),
-      scopeByColumn(pgTasks, pgTasks.workspaceId, {
-        insertKey: "workspaceId",
-      }),
+      scopeByColumn(pgProjects, pgProjects.workspaceId),
+      scopeByColumn(pgTasks, pgTasks.workspaceId),
     ],
   });
 }
