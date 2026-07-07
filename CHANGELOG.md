@@ -4,9 +4,15 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-07
+
+### Breaking changes
+
+- `scopeByColumn(table, table.column)` now infers insert/update validation keys from the table property by default. Rules that previously scoped reads only will now reject cross-scope insert/update payloads unless validation is disabled explicitly with `insertKey: false` or `updateKey: false`.
+
 ### Changed
 
-- Infer `scopeByColumn(table, table.column)` insert/update validation keys from the table property by default, so common single-column rules no longer need `insertKey`; pass `insertKey: false` or `updateKey: false` to disable payload validation explicitly.
+- Common single-column rules no longer need `insertKey`; Drizzle table metadata maps `workspaceId: text("workspace_id")` to the `workspaceId` insert/update payload key automatically.
 
 ## [0.13.0] - 2026-07-07
 
