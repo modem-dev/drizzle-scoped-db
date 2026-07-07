@@ -1,8 +1,9 @@
+import { defineScopedTable } from "../../src/rules";
+
 import {
   eq,
   containsColumnFilter,
   createScopedDb,
-  defineScopedTable,
   InvalidScopedConflictTargetError,
   InvalidScopedInsertError,
   InvalidScopedUpdateError,
@@ -337,6 +338,30 @@ describe("createScopedDb mutation guardrails", () => {
     expect(conflictConfig.setWhere).toBeDefined();
     expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
     expect(rawDb._state.conflictDidNothing).toBe(true);
+  });
+
+  it("injects every composite column scope guard into upsert setWhere", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace-region",
+      scopeValue: { workspaceId: "workspace-1", regionId: "us" },
+      rules: [
+        scopeByColumn(projectsTbl, {
+          workspaceId: projectsTbl.workspaceId,
+          regionId: projectsTbl.regionId,
+        }),
+      ],
+    });
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", regionId: "us", name: "Roadmap" })
+      .onConflictDoUpdate({ target: projectsTbl.id, set: { name: "Updated" } });
+
+    const conflictConfig = rawDb._state.conflictConfig as { setWhere?: SQL };
+    expect(conflictConfig.setWhere).toBeDefined();
+    expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
+    expect(containsColumnFilter(conflictConfig.setWhere, "region_id", projectsTbl)).toBe(true);
   });
 
   it("combines caller-supplied upsert setWhere with the scope guard", () => {

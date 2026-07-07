@@ -1,12 +1,14 @@
+import { defineScopedTable } from "../../src/rules";
+
 import {
   and,
   eq,
   containsColumnFilter,
   createScopedDb,
-  defineScopedTable,
   InvalidScopedUpdateError,
   MissingScopedPredicateError,
   scopeByColumn,
+  scopeByPredicate,
   projectsTbl,
   createFakeDb,
   type SQL,
@@ -20,21 +22,10 @@ describe("createScopedDb custom rules and errors", () => {
       scopeValue: { workspaceId: "workspace-1", regionId: "us" },
       strict: false,
       rules: [
-        defineScopedTable<{ workspaceId: string; regionId: string }, typeof projectsTbl>(
-          projectsTbl,
-          {
-            where: (scope) =>
-              and(
-                eq(projectsTbl.workspaceId, scope.workspaceId),
-                eq(projectsTbl.regionId, scope.regionId),
-              ),
-            validateInsert: (row, scope) =>
-              row.workspaceId === scope.workspaceId && row.regionId === scope.regionId,
-            validateUpdate: (payload, scope) =>
-              (!payload.workspaceId || payload.workspaceId === scope.workspaceId) &&
-              (!payload.regionId || payload.regionId === scope.regionId),
-          },
-        ),
+        scopeByColumn(projectsTbl, {
+          workspaceId: projectsTbl.workspaceId,
+          regionId: projectsTbl.regionId,
+        }),
       ],
     });
 
@@ -125,6 +116,42 @@ describe("createScopedDb custom rules and errors", () => {
     ).toThrow(customInvalidConflictTarget);
   });
 
+  it("derives composite column injection, validation, and strict detection from one rule", () => {
+    const rawDb = createFakeDb();
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace-region",
+      scopeValue: { workspaceId: "workspace-1", regionId: "us" },
+      strict: true,
+      rules: [
+        scopeByColumn(projectsTbl, {
+          workspaceId: projectsTbl.workspaceId,
+          regionId: projectsTbl.regionId,
+        }),
+      ],
+    });
+
+    expect(() =>
+      scopedDb.select().from(projectsTbl).where(eq(projectsTbl.workspaceId, "workspace-1")),
+    ).toThrow(MissingScopedPredicateError);
+
+    scopedDb
+      .select()
+      .from(projectsTbl)
+      .where(and(eq(projectsTbl.workspaceId, "workspace-1"), eq(projectsTbl.regionId, "us")));
+    expect(containsColumnFilter(rawDb._state.selectCondition, "workspace_id")).toBe(true);
+    expect(containsColumnFilter(rawDb._state.selectCondition, "region_id")).toBe(true);
+
+    scopedDb
+      .insert(projectsTbl)
+      .values({ id: "project-1", workspaceId: "workspace-1", regionId: "us", name: "Roadmap" });
+    expect(() =>
+      scopedDb
+        .update(projectsTbl)
+        .set({ regionId: "eu" })
+        .where(and(eq(projectsTbl.workspaceId, "workspace-1"), eq(projectsTbl.regionId, "us"))),
+    ).toThrow(InvalidScopedUpdateError);
+  });
+
   it("throws the default missing-scope error when strict mode is enabled for a custom rule without a scope detector", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
@@ -149,8 +176,9 @@ describe("createScopedDb custom rules and errors", () => {
       scopeValue: "workspace-1",
       strict: false,
       rules: [
-        defineScopedTable<string, typeof projectsTbl>(projectsTbl, {
+        scopeByPredicate(projectsTbl, {
           where: () => undefined,
+          strictColumns: [projectsTbl.workspaceId],
         }),
       ],
     });

@@ -1,8 +1,9 @@
 import { describe, expectTypeOf, it } from "vitest";
+import { eq } from "drizzle-orm";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { SQLJsDatabase } from "drizzle-orm/sql-js";
 
-import type { ScopedDb } from "../../src/index";
+import { scopeByColumn, scopeByPredicate, type ScopedDb } from "../../src/index";
 import { pgProjects } from "../integration/fixtures/postgres";
 import { sqliteProjects } from "../integration/fixtures/sqlite";
 import type { SQL } from "./fixtures";
@@ -11,6 +12,21 @@ type PgScopedDb = ScopedDb<PgliteDatabase<Record<string, never>>, string>;
 type SqliteScopedDb = ScopedDb<SQLJsDatabase<Record<string, never>>, string>;
 
 describe("public type surface", () => {
+  it("allows specifying only the scope type for callback-based rule helpers", () => {
+    const columnRule = scopeByColumn<{ workspaceId: string }>(pgProjects, {
+      workspaceId: {
+        column: pgProjects.workspaceId,
+        value: (scope) => scope.workspaceId,
+      },
+    });
+    const predicateRule = scopeByPredicate<{ workspaceId: string }>(pgProjects, {
+      where: (scope) => eq(pgProjects.workspaceId, scope.workspaceId),
+      strictColumns: [pgProjects.workspaceId],
+    });
+
+    void [columnRule, predicateRule];
+  });
+
   it("gates selectDistinctOn by real dialect DB types", () => {
     expectTypeOf<PgScopedDb["selectDistinctOn"]>().toBeFunction();
     expectTypeOf<SqliteScopedDb["selectDistinctOn"]>().toEqualTypeOf<undefined>();

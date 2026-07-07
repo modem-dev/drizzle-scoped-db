@@ -7,13 +7,13 @@ export {
   assertDrizzleCompatibility,
   containsColumnFilter,
   createScopedDb,
-  defineScopedTable,
   InvalidScopedConflictTargetError,
   InvalidScopedInsertError,
   InvalidScopedUpdateError,
   MissingScopedPredicateError,
   MissingScopedWhereError,
   scopeByColumn,
+  scopeByPredicate,
   type ScopedDb,
 } from "../../src/index";
 

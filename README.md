@@ -57,7 +57,7 @@ RLS gives you a boundary the application can't bypass, but it lives in the datab
 - **Tenant or org isolation.** Keep `tenant_id = currentTenant` on every query so one customer never sees another's rows.
 - **Per-user data.** Force `user_id = currentUser` on private rows.
 - **Region or data residency.** Keep `region = 'eu'` on every query.
-- **Soft deletes.** Always exclude deleted rows with `isNull(table.deletedAt)` via [`defineScopedTable`](#custom-scope-rules).
+- **Soft deletes.** Always exclude deleted rows with `isNull(table.deletedAt)` via [`scopeByPredicate`](#custom-scope-rules).
 - **Visibility.** A read handle that injects `published = true`, so public endpoints never surface drafts.
 - **Row-level ACLs.** A composite predicate such as `owner_id = me OR shared_with @> me`.
 
@@ -301,7 +301,7 @@ await workspaceDb.select().from(projects).where(ne(projects.workspaceId, workspa
 
 The predicate must sit on the scoped table itself: filtering a joined table's same-named column (e.g. `eq(tasks.workspaceId, workspaceId)` while selecting `projects`) does not satisfy the check. Aliases of scoped tables are rejected unless the alias has its own explicit scoped rule, so an alias cannot silently bypass rule lookup.
 
-Custom `defineScopedTable` rules need `hasScopeInWhere` for strict validation. Opt out with `strict: false` if you want pure predicate injection:
+Opt out with `strict: false` if you want pure predicate injection:
 
 ```ts
 const workspaceDb = createScopedDb(db, {
@@ -317,37 +317,42 @@ await workspaceDb.select().from(projects).where(eq(projects.id, projectId));
 
 ## Custom scope rules
 
-Use `defineScopedTable` for composite scopes or predicates that are not a single equality column.
+Use `scopeByColumn` with an object map for composite column scopes. It derives the injected predicate, insert/update validation, strict SQL validation, and RQBv2 object-filter support from one declaration.
 
 ```ts
-import {
-  containsColumnFilter,
-  createScopedDb,
-  defineScopedTable,
-} from "@modemdev/drizzle-scoped-db";
-import { and, eq } from "drizzle-orm";
+import { createScopedDb, scopeByColumn } from "@modemdev/drizzle-scoped-db";
 
 const scopedDb = createScopedDb(db, {
   scopeName: "workspace-region",
   scopeValue: { workspaceId, regionId },
   rules: [
-    defineScopedTable(records, {
-      where: (scope) =>
-        and(eq(records.workspaceId, scope.workspaceId), eq(records.regionId, scope.regionId)),
-      validateInsert: (row, scope) =>
-        row.workspaceId === scope.workspaceId && row.regionId === scope.regionId,
-      validateUpdate: (payload, scope) =>
-        (payload.workspaceId === undefined || payload.workspaceId === scope.workspaceId) &&
-        (payload.regionId === undefined || payload.regionId === scope.regionId),
-      hasScopeInWhere: (condition) =>
-        containsColumnFilter(condition, "workspace_id", records) &&
-        containsColumnFilter(condition, "region_id", records),
+    scopeByColumn(records, {
+      workspaceId: records.workspaceId,
+      regionId: records.regionId,
     }),
   ],
 });
 ```
 
-`hasScopeInWhere` is required for custom rules when strict mode is enabled. If you want injection-only custom rules, pass `strict: false` to `createScopedDb(...)`. If a rule's SQL `where(scopeValue)` returns `undefined`, SQL-backed scoped selects, joins, updates, deletes, callback relational reads, and guarded upserts fail closed instead of running without the injected predicate.
+Use `scopeByPredicate` for predicates that cannot be represented as column equality, such as soft deletes or visibility flags:
+
+```ts
+import { createScopedDb, scopeByPredicate } from "@modemdev/drizzle-scoped-db";
+import { isNull } from "drizzle-orm";
+
+const visibleDb = createScopedDb(db, {
+  scopeName: "not-deleted",
+  scopeValue: true,
+  rules: [
+    scopeByPredicate(posts, {
+      where: () => isNull(posts.deletedAt),
+      strictColumns: [posts.deletedAt],
+    }),
+  ],
+});
+```
+
+Pass an array to `scopeByPredicate(...)` when multiple arbitrary predicates should be ANDed together. `strictColumns` tells strict mode which columns must appear in the caller predicate; the wrapper's `where(...)` remains the authoritative injected guard. If a predicate cannot be represented with `scopeByColumn` or `scopeByPredicate`, use an explicit unsafe escape and keep the bespoke query local.
 
 ## Escape hatches
 
@@ -366,13 +371,13 @@ workspaceDb
 
 The wrapper forwards your `target`, `set`, and `targetWhere`, and auto-injects the rule's scope predicate into `setWhere`. If a conflict points at a row from another scope, the `DO UPDATE ... WHERE scope = value` guard is false, so the conflict safely no-ops instead of updating or inserting.
 
-For `scopeByColumn`, this works when `insertKey` is configured; that validates `.values(...)` and also validates `set` payloads unless you override the update field with `updateKey`. Custom `defineScopedTable` rules can opt in with `validateInsert` and `validateUpdate`; the guard is derived from the rule's existing `where(scopeValue)` predicate.
+For `scopeByColumn`, this works when `insertKey` is configured; that validates `.values(...)` and also validates `set` payloads unless you override the update field with `updateKey`. Composite `scopeByColumn` maps derive insert/update validation from their column map. Predicate-only rules from `scopeByPredicate` do not validate mutation payloads, so use the unsafe escape for upserts that need bespoke predicate semantics.
 
 When you need deliberate cross-scope writes, use an explicit escape hatch so you (and your agent) can see the audit boundary.
 
 ### Local escape: `.$unsafeUnscoped()`
 
-Use after scoped insert validation for conflict handlers the scoped facade intentionally will not guard, such as targetless MySQL `onDuplicateKeyUpdate(...)`, custom rules without upsert validators, or deliberate cross-scope writes like reassigning a row's owner during a connect flow:
+Use after scoped insert validation for conflict handlers the scoped facade intentionally will not guard, such as targetless MySQL `onDuplicateKeyUpdate(...)`, predicate-only rules without payload validators, or deliberate cross-scope writes like reassigning a row's owner during a connect flow:
 
 ```ts
 workspaceDb
@@ -449,7 +454,7 @@ Tables without rules are not scoped: inserts, updates, and deletes return the un
 type CreateScopedDbOptions<TScope> = {
   scopeName: string;
   scopeValue: TScope;
-  rules: ScopedTableRule<TScope>[];
+  rules: ScopeRule<TScope>[];
   strict?: boolean; // defaults to true
 };
 ```
@@ -483,30 +488,46 @@ type ScopeByColumnOptions<TScope> = {
 };
 ```
 
-### `defineScopedTable(table, rule)`
+Composite form:
 
 ```ts
-type ScopedTableRule<
-  TScope,
-  TInsert = Record<string, unknown>,
-  TUpdate = Record<string, unknown>,
-> = {
-  table: Table;
+scopeByColumn(records, {
+  workspaceId: records.workspaceId,
+  regionId: records.regionId,
+});
+```
+
+### `scopeByColumn(table, columns, options)`
+
+```ts
+type ScopeByColumnEntry<TScope> =
+  | Column
+  | {
+      column: Column;
+      value?: (scopeValue: TScope) => unknown; // defaults to scopeValue[key]
+      insertKey?: string | false; // defaults to key
+      updateKey?: string | false; // defaults to insertKey
+      columnName?: string;
+      equals?: (rowValue: unknown, scopeValue: unknown) => boolean;
+    };
+
+type ScopeByColumnMapOptions = {
   queryName?: string;
   tableName?: string;
+};
+```
+
+### `scopeByPredicate(table, predicate, options)`
+
+```ts
+type ScopeByPredicateEntry<TScope> = {
   where: (scopeValue: TScope) => SQL | undefined;
-  validateInsert?: (row: TInsert, scopeValue: TScope) => boolean;
-  validateUpdate?: (payload: TUpdate, scopeValue: TScope) => boolean;
-  // Required when createScopedDb({ strict: true }) is enabled.
-  hasScopeInWhere?: (condition: SQL | undefined) => boolean;
-  relational?: {
-    rqbV2?: {
-      // Object filter injected into Drizzle 1.0 RQBv2 relational find queries.
-      where: (scopeValue: TScope) => Record<string, unknown> | undefined;
-      // Strict-mode detector for RQBv2 object filters.
-      hasScopeInWhere?: (condition: unknown) => boolean;
-    };
-  };
+  strictColumns: readonly Column[];
+};
+
+type ScopeByPredicateOptions = {
+  queryName?: string;
+  tableName?: string;
 };
 ```
 
