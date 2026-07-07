@@ -4,6 +4,13 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-07
+
+### Breaking changes
+
+- This pre-1.0 minor release intentionally removes `defineScopedTable(...)` and `ScopedTableRule` from the public entrypoint. Prefer declarative `scopeByColumn(...)` / `scopeByPredicate(...)` rules, or use an explicit unsafe escape for bespoke query paths.
+- Remove the legacy `hasScopeInConflictTarget` custom-rule hook. Scoped PostgreSQL/SQLite upserts now derive their conflict-update guard from the rule's injected `where(scopeValue)` predicate and attach it to `setWhere`.
+
 ### Added
 
 - Extend `scopeByColumn(...)` to accept composite column scopes, deriving guard predicate injection, insert/update validation, strict SQL validation, and RQBv2 object filters from one declaration.
@@ -11,7 +18,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
-- Remove the unused legacy `hasScopeInConflictTarget` rule hook in favor of scoped upsert `setWhere` guards, remove `defineScopedTable(...)` from the public entrypoint, and simplify the README API docs by moving advanced wrapper options out of the primary path.
+- Simplify the README API docs by moving advanced wrapper options out of the primary path.
 - Throw a clear error when a `scopeByColumn(...)` column map's default resolver receives a primitive scope value, instead of silently resolving to `undefined` and producing always-empty guards. Use the single-column form for primitive scopes or supply an explicit `value` resolver.
 
 ## [0.12.0] - 2026-07-04
