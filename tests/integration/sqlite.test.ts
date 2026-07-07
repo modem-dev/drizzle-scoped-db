@@ -23,12 +23,8 @@ function createScopedSqliteDb(db: SqliteIntegrationDb, workspaceId = "workspace-
     scopeValue: workspaceId,
     strict: false,
     rules: [
-      scopeByColumn(sqliteProjects, sqliteProjects.workspaceId, {
-        insertKey: "workspaceId",
-      }),
-      scopeByColumn(sqliteTasks, sqliteTasks.workspaceId, {
-        insertKey: "workspaceId",
-      }),
+      scopeByColumn(sqliteProjects, sqliteProjects.workspaceId),
+      scopeByColumn(sqliteTasks, sqliteTasks.workspaceId),
     ],
   });
 }

@@ -30,9 +30,9 @@ type _PgHasSelectDistinctOn = Expect<
 type _SqliteSelectDistinctOnAbsent = Expect<Equal<SqliteScopedDb["selectDistinctOn"], undefined>>;
 
 const _assertDistDeclarations = async (pgDb: PgScopedDb, sqliteDb: SqliteScopedDb) => {
-  const pgRule = scopeByColumn(pgProjects, pgProjects.workspaceId, { insertKey: "workspaceId" });
+  const pgRule = scopeByColumn(pgProjects, pgProjects.workspaceId);
   const sqliteRule = scopeByColumn(sqliteProjects, sqliteProjects.workspaceId, {
-    insertKey: "workspaceId",
+    insertKey: false,
   });
   void [pgRule, sqliteRule];
 

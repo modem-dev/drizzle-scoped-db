@@ -261,29 +261,21 @@ describe("createScopedDb mutation guardrails", () => {
     expect(containsColumnFilter(rawDb._state.deleteCondition, "workspace_id")).toBe(true);
   });
 
-  it("allows scoped inserts without insert validation when no validator is declared and validates batch inserts when one is declared", () => {
+  it("infers scoped insert validation and allows it to be disabled explicitly", () => {
     const rawDb = createFakeDb();
-    const scopedDbWithoutInsertValidation = createScopedDb(rawDb, {
+    const scopedDbWithInferredInsertValidation = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
       rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
     });
 
-    scopedDbWithoutInsertValidation
-      .insert(projectsTbl)
-      .values({ id: "project-1", workspaceId: "workspace-2", name: "No validation" });
-    expect(rawDb._state.insertValues).toEqual({
-      id: "project-1",
-      workspaceId: "workspace-2",
-      name: "No validation",
-    });
+    expect(() =>
+      scopedDbWithInferredInsertValidation
+        .insert(projectsTbl)
+        .values({ id: "project-1", workspaceId: "workspace-2", name: "Wrong" }),
+    ).toThrow(InvalidScopedInsertError);
 
-    const scopedDbWithInsertValidation = createScopedDb(rawDb, {
-      scopeName: "workspace",
-      scopeValue: "workspace-1",
-      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: "workspaceId" })],
-    });
-    scopedDbWithInsertValidation.insert(projectsTbl).values([
+    scopedDbWithInferredInsertValidation.insert(projectsTbl).values([
       { id: "project-2", workspaceId: "workspace-1", name: "One" },
       { id: "project-3", workspaceId: "workspace-1", name: "Two" },
     ]);
@@ -294,7 +286,7 @@ describe("createScopedDb mutation guardrails", () => {
     ]);
 
     expect(() =>
-      scopedDbWithInsertValidation.insert(projectsTbl).values([
+      scopedDbWithInferredInsertValidation.insert(projectsTbl).values([
         { id: "project-4", workspaceId: "workspace-1", name: "Valid" },
         { id: "project-5", workspaceId: "workspace-2", name: "Wrong" },
       ]),
@@ -303,6 +295,20 @@ describe("createScopedDb mutation guardrails", () => {
       { id: "project-2", workspaceId: "workspace-1", name: "One" },
       { id: "project-3", workspaceId: "workspace-1", name: "Two" },
     ]);
+
+    const scopedDbWithoutInsertValidation = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { insertKey: false })],
+    });
+    scopedDbWithoutInsertValidation
+      .insert(projectsTbl)
+      .values({ id: "project-6", workspaceId: "workspace-2", name: "No validation" });
+    expect(rawDb._state.insertValues).toEqual({
+      id: "project-6",
+      workspaceId: "workspace-2",
+      name: "No validation",
+    });
   });
 
   it("supports scoped Postgres-style upserts on non-scope conflict targets by injecting setWhere", () => {
@@ -466,7 +472,12 @@ describe("createScopedDb mutation guardrails", () => {
     const scopedDbWithoutInsertValidation = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
-      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { updateKey: "workspaceId" })],
+      rules: [
+        scopeByColumn(projectsTbl, projectsTbl.workspaceId, {
+          insertKey: false,
+          updateKey: "workspaceId",
+        }),
+      ],
     });
     expect(() =>
       scopedDbWithoutInsertValidation
@@ -647,13 +658,13 @@ describe("createScopedDb mutation guardrails", () => {
     expect(containsColumnFilter(conflictConfig.setWhere, "workspace_id", projectsTbl)).toBe(true);
   });
 
-  it("allows scoped updates without update validation when no update validator is declared", () => {
+  it("allows scoped updates without update validation when validation is disabled", () => {
     const rawDb = createFakeDb();
     const scopedDb = createScopedDb(rawDb, {
       scopeName: "workspace",
       scopeValue: "workspace-1",
       strict: false,
-      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId, { updateKey: false })],
     });
 
     const result = scopedDb
