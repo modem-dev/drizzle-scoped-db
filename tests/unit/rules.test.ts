@@ -71,13 +71,26 @@ describe("scope table rule helpers", () => {
     expect(
       rule.validateUpdate?.({ name: "Renamed" }, { workspaceId: "workspace-1", regionId: "us" }),
     ).toBe(true);
+  });
 
+  it("throws when a column map's default resolver receives a primitive scope value", () => {
     const primitiveScopeRule = scopeByColumn<string, typeof projectsTbl>(projectsTbl, {
       workspaceId: projectsTbl.workspaceId,
     });
-    expect(primitiveScopeRule.validateInsert?.({ workspaceId: "workspace-1" }, "workspace-1")).toBe(
-      false,
+
+    expect(() =>
+      primitiveScopeRule.validateInsert?.({ workspaceId: "workspace-1" }, "workspace-1"),
+    ).toThrow('scopeByColumn() column map "workspaceId" needs an object scope value');
+    expect(() => primitiveScopeRule.where("workspace-1")).toThrow(
+      "needs an object scope value to resolve, but received string",
     );
+
+    const explicitResolverRule = scopeByColumn<string, typeof projectsTbl>(projectsTbl, {
+      workspaceId: { column: projectsTbl.workspaceId, value: (scope) => scope },
+    });
+    expect(
+      explicitResolverRule.validateInsert?.({ workspaceId: "workspace-1" }, "workspace-1"),
+    ).toBe(true);
   });
 
   it("creates predicate rules with strict column detection", () => {
