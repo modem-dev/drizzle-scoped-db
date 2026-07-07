@@ -8,6 +8,7 @@
 
 - `src/index.ts` — public exports.
 - `src/scoped-db.ts` — root scoped DB wrapper and transaction wrapping.
+- `src/rules.ts` — public declarative rule helpers (`scopeByColumn`, `scopeByPredicate`) and internal bespoke rule construction.
 - `src/internal/select.ts` — scoped select/join facades.
 - `src/internal/mutations.ts` — scoped insert/update/delete facades, upsert guarding, and mutation-result escape prevention.
 - `src/internal/relational.ts` — scoped Drizzle relational query wrappers.
@@ -21,11 +22,13 @@
 
 ## Working rules
 
-- Keep the public API small and stable: cover the common 95% of scoped queries, not the full Drizzle API.
+- Keep the public API small and stable: optimize for the common 90–95% of scoped query needs, not the full Drizzle API.
+- Keep rule declaration declarative for users: prefer `scopeByColumn(...)` (single or composite equality scopes) and `scopeByPredicate(...)` (non-equality predicates). Do not re-expose low-level custom rule hooks or add bespoke public options for edge cases unless there is a strong API-design reason; rare cases should use loud unsafe escapes.
 - Treat the scoped facade as a narrow safe subset. Advanced builder shapes must be explicitly modeled with tests or fail loud/fail closed behind `_unsafeUnscopedDb` / `.$unsafeUnscoped()`.
 - Preserve dialect-generic Drizzle core types where possible within that supported surface.
 - Do not expose unloud raw Drizzle builder escape paths from scoped facades; be especially careful with fluent methods like `.where(...)`, `.returning(...)`, `$dynamic()`, and conflict/upsert methods.
 - Fail closed for ambiguous scoped table aliases unless the alias has its own explicit scoped rule.
+- Keep strict validation honest: it checks that caller predicates mention configured scope context; the wrapper's injected predicate is the authoritative guard. Do not document strict mode as semantic proof of equality to the active scope value.
 - Keep scoped upserts safe by deriving guards from `rule.where(scopeValue)` and injecting them into `setWhere`; do not require conflict targets to include the scope column.
 - Do not add application-internal dependencies to this standalone package.
 - Prefer behavior-focused tests over implementation-only assertions, especially security regression tests for scope bypasses and escape boundaries.
