@@ -5,18 +5,6 @@ import type { ScopedTableRule } from "../../src/types";
 import { projectsTbl, scopeByColumn, tasksTbl, type Column } from "./fixtures";
 
 describe("scope table rule helpers", () => {
-  it("detects scope columns in conflict targets by identity, arrays, and column names", () => {
-    const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId);
-
-    expect(rule.hasScopeInConflictTarget?.(projectsTbl.workspaceId)).toBe(true);
-    expect(rule.hasScopeInConflictTarget?.([projectsTbl.id, projectsTbl.workspaceId])).toBe(true);
-    expect(rule.hasScopeInConflictTarget?.({ name: "workspace_id" })).toBe(true);
-    expect(rule.hasScopeInConflictTarget?.({ name: "id" })).toBe(false);
-    expect(rule.hasScopeInConflictTarget?.({ columnName: "workspace_id" })).toBe(false);
-    expect(rule.hasScopeInConflictTarget?.(null)).toBe(false);
-    expect(rule.hasScopeInConflictTarget?.("workspace_id")).toBe(false);
-  });
-
   it("requires an inferable column name unless columnName is provided", () => {
     const malformedColumn = {} as Column;
 
@@ -25,7 +13,7 @@ describe("scope table rule helpers", () => {
     );
 
     const rule = scopeByColumn(projectsTbl, malformedColumn, { columnName: "workspace_id" });
-    expect(rule.hasScopeInConflictTarget?.({ name: "workspace_id" })).toBe(true);
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(true);
   });
 
   it("delegates where predicate detection to the inferred column name", () => {

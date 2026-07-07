@@ -31,7 +31,6 @@ export function scopeByColumn<TScope, TTable extends ScopedTable>(
           return equals((payload as Record<string, unknown>)[updateKey], scopeValue);
         }
       : undefined,
-    hasScopeInConflictTarget: (target) => conflictTargetContainsColumn(target, column, columnName),
     hasScopeInWhere: (condition) => containsColumnFilter(condition, columnName, table),
     relational: createColumnRelationalSupport(table, column, columnName),
   };
@@ -57,23 +56,4 @@ function getColumnName(column: Column): string {
     throw new Error("Unable to infer Drizzle column name. Pass `columnName` to scopeByColumn().");
   }
   return columnWithName.name;
-}
-
-/** Checks whether a Drizzle conflict target includes the column that carries scope. */
-function conflictTargetContainsColumn(
-  target: unknown,
-  column: Column,
-  columnName: string,
-): boolean {
-  const targets = Array.isArray(target) ? target : [target];
-  return targets.some((candidate) => candidate === column || hasColumnName(candidate, columnName));
-}
-
-function hasColumnName(candidate: unknown, columnName: string): boolean {
-  return (
-    typeof candidate === "object" &&
-    candidate !== null &&
-    "name" in candidate &&
-    (candidate as { name?: unknown }).name === columnName
-  );
 }
