@@ -12,6 +12,7 @@ All notable user-visible changes to this project are documented in this file.
 ### Changed
 
 - Remove the unused legacy `hasScopeInConflictTarget` rule hook in favor of scoped upsert `setWhere` guards, remove `defineScopedTable(...)` from the public entrypoint, and simplify the README API docs by moving advanced wrapper options out of the primary path.
+- Throw a clear error when a `scopeByColumn(...)` column map's default resolver receives a primitive scope value, instead of silently resolving to `undefined` and producing always-empty guards. Use the single-column form for primitive scopes or supply an explicit `value` resolver.
 
 ## [0.12.0] - 2026-07-04
 

@@ -189,10 +189,15 @@ function normalizeColumnEntry<TScope>(
     updateKey,
     value:
       config.value ??
-      ((scopeValue) =>
-        typeof scopeValue === "object" && scopeValue !== null
-          ? (scopeValue as Record<string, unknown>)[key]
-          : undefined),
+      ((scopeValue) => {
+        if (typeof scopeValue !== "object" || scopeValue === null) {
+          throw new Error(
+            `scopeByColumn() column map "${key}" needs an object scope value to resolve, but received ${typeof scopeValue}. ` +
+              "Use the single-column form for primitive scopes, or provide an explicit `value` resolver.",
+          );
+        }
+        return (scopeValue as Record<string, unknown>)[key];
+      }),
     equals: config.equals ?? Object.is,
   };
 }
