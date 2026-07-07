@@ -4,8 +4,8 @@ import {
   createScopedDb,
   MissingScopedPredicateError,
   MissingScopedWhereError,
-  defineScopedTable,
   scopeByColumn,
+  scopeByPredicate,
   projectsTbl,
   createFakeDb,
 } from "./fixtures";
@@ -259,6 +259,43 @@ describe("createScopedDb relational query guardrails", () => {
     });
   });
 
+  it("uses composite column rules for RQBv2 object-filter injection and strict validation", async () => {
+    const state: { relationalObjectWhere?: unknown } = {};
+    const rawDb = {
+      ...createFakeDb(),
+      query: { projects: new FakeRqbV2TableQuery(state) },
+    };
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace-region",
+      scopeValue: { workspaceId: "workspace-1", regionId: "us" },
+      strict: true,
+      rules: [
+        scopeByColumn(
+          projectsTbl,
+          {
+            workspaceId: projectsTbl.workspaceId,
+            regionId: projectsTbl.regionId,
+          },
+          { queryName: "projects" },
+        ),
+      ],
+    });
+
+    expect(() =>
+      scopedDb.query.projects.findMany({ where: { workspaceId: "workspace-1" } }),
+    ).toThrow(MissingScopedPredicateError);
+
+    await scopedDb.query.projects.findMany({
+      where: { AND: [{ workspaceId: "workspace-1" }, { regionId: "us" }] },
+    });
+    expect(state.relationalObjectWhere).toEqual({
+      AND: [
+        { AND: [{ workspaceId: "workspace-1" }, { regionId: "us" }] },
+        { workspaceId: "workspace-1", regionId: "us" },
+      ],
+    });
+  });
+
   it("rejects RQBv2 callback/SQL where shapes and custom rules without object-filter support", async () => {
     const state: { relationalObjectWhere?: unknown } = {};
     const rawDb = {
@@ -306,10 +343,14 @@ describe("createScopedDb relational query guardrails", () => {
       scopeValue: "workspace-1",
       strict: false,
       rules: [
-        defineScopedTable(projectsTbl, {
-          queryName: "projects",
-          where: () => eq(projectsTbl.workspaceId, "workspace-1"),
-        }),
+        scopeByPredicate(
+          projectsTbl,
+          {
+            where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+            strictColumns: [projectsTbl.workspaceId],
+          },
+          { queryName: "projects" },
+        ),
       ],
     });
 

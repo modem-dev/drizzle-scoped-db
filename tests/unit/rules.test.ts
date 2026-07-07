@@ -1,15 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { getRuleForTable, normalizeOptions } from "../../src/internal/options";
 import type { ScopedTableRule } from "../../src/types";
-import { projectsTbl, scopeByColumn, tasksTbl, type Column } from "./fixtures";
+import { projectsTbl, scopeByColumn, scopeByPredicate, tasksTbl, type Column } from "./fixtures";
 
 describe("scope table rule helpers", () => {
   it("requires an inferable column name unless columnName is provided", () => {
     const malformedColumn = {} as Column;
 
     expect(() => scopeByColumn(projectsTbl, malformedColumn)).toThrow(
-      "Unable to infer Drizzle column name. Pass `columnName` to scopeByColumn().",
+      "Unable to infer Drizzle column name for scopeByColumn()",
     );
 
     const rule = scopeByColumn(projectsTbl, malformedColumn, { columnName: "workspace_id" });
@@ -21,6 +21,120 @@ describe("scope table rule helpers", () => {
 
     expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(true);
     expect(rule.hasScopeInWhere?.(eq(projectsTbl.id, "project-1"))).toBe(false);
+  });
+
+  it("creates composite column rules from one declaration", () => {
+    const rule = scopeByColumn<{ workspaceId: string; regionId: string }, typeof projectsTbl>(
+      projectsTbl,
+      {
+        workspaceId: projectsTbl.workspaceId,
+        region: {
+          column: projectsTbl.regionId,
+          value: (scope: { regionId: string }) => scope.regionId.toUpperCase(),
+          insertKey: false,
+          updateKey: "regionId",
+          equals: (left, right) => String(left).toUpperCase() === right,
+        },
+        name: {
+          column: projectsTbl.name,
+          value: () => "Roadmap",
+          updateKey: false,
+        },
+      },
+      { queryName: "projects", tableName: "Project" },
+    );
+
+    expect(rule.queryName).toBe("projects");
+    expect(rule.tableName).toBe("Project");
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(false);
+    expect(
+      rule.hasScopeInWhere?.(
+        and(
+          eq(projectsTbl.workspaceId, "workspace-1"),
+          eq(projectsTbl.regionId, "US"),
+          eq(projectsTbl.name, "Roadmap"),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      rule.validateInsert?.(
+        { workspaceId: "workspace-1", regionId: "ignored", name: "Roadmap" },
+        { workspaceId: "workspace-1", regionId: "us" },
+      ),
+    ).toBe(true);
+    expect(
+      rule.validateUpdate?.({ regionId: "us" }, { workspaceId: "workspace-1", regionId: "us" }),
+    ).toBe(true);
+    expect(
+      rule.validateUpdate?.({ regionId: "eu" }, { workspaceId: "workspace-1", regionId: "us" }),
+    ).toBe(false);
+    expect(
+      rule.validateUpdate?.({ name: "Renamed" }, { workspaceId: "workspace-1", regionId: "us" }),
+    ).toBe(true);
+
+    const primitiveScopeRule = scopeByColumn<string, typeof projectsTbl>(projectsTbl, {
+      workspaceId: projectsTbl.workspaceId,
+    });
+    expect(primitiveScopeRule.validateInsert?.({ workspaceId: "workspace-1" }, "workspace-1")).toBe(
+      false,
+    );
+  });
+
+  it("creates predicate rules with strict column detection", () => {
+    const rule = scopeByPredicate(
+      projectsTbl,
+      {
+        where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+        strictColumns: [projectsTbl.workspaceId],
+      },
+      { queryName: "projects", tableName: "Project" },
+    );
+
+    expect(rule.queryName).toBe("projects");
+    expect(rule.tableName).toBe("Project");
+    expect(rule.where("ignored")).toBeDefined();
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(true);
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.id, "project-1"))).toBe(false);
+    expect(() =>
+      scopeByPredicate(projectsTbl, {
+        where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+        strictColumns: [],
+      }),
+    ).toThrow("strict predicate validation requires at least one column.");
+    expect(() =>
+      scopeByPredicate(projectsTbl, {
+        where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+        strictColumns: [{} as Column],
+      }),
+    ).toThrow("Unable to infer Drizzle column name for scopeByPredicate() strictColumns");
+    expect(() => scopeByPredicate(projectsTbl, [])).toThrow(
+      "scopeByPredicate() requires at least one predicate.",
+    );
+  });
+
+  it("combines multiple predicate rules", () => {
+    const rule = scopeByPredicate(projectsTbl, [
+      {
+        where: () => eq(projectsTbl.workspaceId, "workspace-1"),
+        strictColumns: [projectsTbl.workspaceId],
+      },
+      { where: () => eq(projectsTbl.regionId, "us"), strictColumns: [projectsTbl.regionId] },
+    ]);
+
+    expect(rule.where("ignored")).toBeDefined();
+    expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(false);
+    expect(
+      rule.hasScopeInWhere?.(
+        and(eq(projectsTbl.workspaceId, "workspace-1"), eq(projectsTbl.regionId, "us")),
+      ),
+    ).toBe(true);
+  });
+
+  it("omits composite RQBv2 support when keys cannot resolve", () => {
+    const rule = scopeByColumn({} as typeof projectsTbl, {
+      workspaceId: { column: { name: "workspace_id" } as Column },
+    });
+    expect(rule.relational).toBeUndefined();
   });
 
   it("adds RQBv2 object-filter helpers when the column key can be resolved", () => {

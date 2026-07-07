@@ -44,7 +44,7 @@ describe("Drizzle compatibility helpers", () => {
     const rule = scopeByColumn(projectsTbl, projectsTbl.workspaceId, { columnName: "tenant_id" });
     expect(rule.hasScopeInWhere?.(eq(projectsTbl.workspaceId, "workspace-1"))).toBe(false);
     expect(() => scopeByColumn(projectsTbl, {} as Column)).toThrow(
-      "Unable to infer Drizzle column name",
+      "Unable to infer Drizzle column name for scopeByColumn()",
     );
   });
 

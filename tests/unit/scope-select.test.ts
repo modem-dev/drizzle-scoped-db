@@ -5,10 +5,10 @@ import {
   eq,
   containsColumnFilter,
   createScopedDb,
-  defineScopedTable,
   MissingScopedPredicateError,
   MissingScopedWhereError,
   scopeByColumn,
+  scopeByPredicate,
   projectsTbl,
   tasksTbl,
   usersTbl,
@@ -177,8 +177,9 @@ describe("createScopedDb select guardrails", () => {
       strict: false,
       rules: [
         scopeByColumn(projectsTbl, projectsTbl.workspaceId),
-        defineScopedTable<string, typeof tasksTbl>(tasksTbl, {
+        scopeByPredicate(tasksTbl, {
           where: () => undefined,
+          strictColumns: [tasksTbl.taskWorkspaceId],
         }),
       ],
     });

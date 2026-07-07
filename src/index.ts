@@ -6,7 +6,7 @@ export {
   MissingScopedPredicateError,
   MissingScopedWhereError,
 } from "./errors.js";
-export { defineScopedTable, scopeByColumn } from "./rules.js";
+export { scopeByColumn, scopeByPredicate } from "./rules.js";
 export { createScopedDb } from "./scoped-db.js";
 export type {
   CreateScopedDbOptions,
@@ -22,8 +22,12 @@ export type {
   ScopedQueryBuilder,
   ScopedSelectBuilder,
   ScopedTable,
-  ScopedTableRule,
+  ScopeRule,
   ScopedUpdateBuilder,
   ScopedWhereBuilder,
+  ScopeByColumnEntry,
+  ScopeByColumnMapOptions,
   ScopeByColumnOptions,
+  ScopeByPredicateEntry,
+  ScopeByPredicateOptions,
 } from "./types.js";

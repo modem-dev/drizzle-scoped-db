@@ -4,9 +4,14 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Extend `scopeByColumn(...)` to accept composite column scopes, deriving guard predicate injection, insert/update validation, strict SQL validation, and RQBv2 object filters from one declaration.
+- Add `scopeByPredicate(...)` for one or more non-equality predicates such as soft deletes, with strict SQL validation derived from declared columns.
+
 ### Changed
 
-- Remove the unused legacy `hasScopeInConflictTarget` rule hook in favor of scoped upsert `setWhere` guards, and simplify the README API docs by moving advanced wrapper options out of the primary path.
+- Remove the unused legacy `hasScopeInConflictTarget` rule hook in favor of scoped upsert `setWhere` guards, remove `defineScopedTable(...)` from the public entrypoint, and simplify the README API docs by moving advanced wrapper options out of the primary path.
 
 ## [0.12.0] - 2026-07-04
 

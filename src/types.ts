@@ -59,6 +59,59 @@ export type ScopedTableRule<
   };
 };
 
+/** Public scoped rule returned by the declarative rule helpers. */
+export type ScopeRule<TScope, TTable extends ScopedTable = ScopedTable> = ScopedTableRule<
+  TScope,
+  TTable
+>;
+
+/** One component of a column equality scope. */
+export type ScopeByColumnEntry<TScope> =
+  | Column
+  | {
+      /** Column that stores this scope component. */
+      column: Column;
+      /** Resolve this column's expected value from the current scope. Defaults to scopeValue[key]. */
+      value?: (scopeValue: TScope) => unknown;
+      /** Insert row property to validate for this component. Defaults to the object key; false disables. */
+      insertKey?: string | false;
+      /** Update payload property to validate for this component. Defaults to insertKey; false disables. */
+      updateKey?: string | false;
+      /** SQL column name used by strict validation. Defaults to the Drizzle column name. */
+      columnName?: string;
+      /** Custom equality function for insert/update validation. Defaults to Object.is. */
+      equals?: (rowValue: unknown, scopeValue: unknown) => boolean;
+    };
+
+export type ScopeByColumnMapOptions = {
+  /** Optional db.query property name for relational query API support. */
+  queryName?: string;
+  /** Human-readable table name used in errors. */
+  tableName?: string;
+};
+
+export type ScopeByPredicateEntry<TScope> = {
+  /** Predicate that is always injected into scoped select/update/delete/find queries. */
+  where: (scopeValue: TScope) => SQL | undefined;
+  /** Columns that must appear in caller SQL predicates for strict validation. */
+  strictColumns: readonly Column[];
+};
+
+export type ScopeByPredicateOptions = {
+  /** Optional db.query property name for relational callback-query support. */
+  queryName?: string;
+  /** Human-readable table name used in errors. */
+  tableName?: string;
+};
+
+/** Input accepted internally by defineScopedTable(...) for fully custom scoping rules. */
+export type DefineScopedTableRule<
+  TScope,
+  TTable extends ScopedTable = ScopedTable,
+  TInsert = Record<string, unknown>,
+  TUpdate = Record<string, unknown>,
+> = Omit<ScopedTableRule<TScope, TTable, TInsert, TUpdate>, "table">;
+
 /** Error customization hooks for scoped wrappers. */
 export type ScopedDbErrors<TScope> = {
   missingWhere?: (tableName: string, scopeName: string, scopeValue: TScope) => Error;
@@ -90,7 +143,7 @@ export type CreateScopedDbOptions<
   /** The current scope value that will be injected into protected queries. */
   scopeValue: TScope;
   /** Table-specific scoping rules. Tables without rules pass through unchanged. */
-  rules: ScopedTableRule<TScope>[];
+  rules: ScopeRule<TScope>[];
   /**
    * Strict mode requires callers to provide `.where(...)` and include the declared scope predicate.
    * Defaults to `true`; pass `false` to allow implicit scope-only queries.
