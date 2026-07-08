@@ -23,13 +23,16 @@ export function scopeRelationalWith<TScope>(
   options: NormalizedCreateScopedDbOptions<TScope>,
   parentTableName: string,
 ): Record<string, unknown> | undefined {
-  if (!config || config.with == null || typeof config.with !== "object") {
+  // Snapshot `with` once so a getter cannot return a different value between the guard and the scope
+  // pass; the scoped copy is always derived from the exact object that was validated.
+  const withConfig = config?.with;
+  if (!config || withConfig == null || typeof withConfig !== "object") {
     return config;
   }
 
   return {
     ...config,
-    with: scopeWith(config.with as WithConfig, parentRelations, schema, options, parentTableName),
+    with: scopeWith(withConfig as WithConfig, parentRelations, schema, options, parentTableName),
   };
 }
 

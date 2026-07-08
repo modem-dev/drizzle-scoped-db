@@ -22,6 +22,9 @@ const resolverCache = new WeakMap<object, RelationalSchemaResolver>();
  * when no resolver is available.
  */
 export function createRelationalSchemaResolver(db: unknown): RelationalSchemaResolver | undefined {
+  // `db._.schema` is Drizzle's internal relational config (the `TablesRelationalConfig`), not public
+  // API. If a Drizzle version moves or reshapes it, this read yields `undefined` and callers fall back
+  // to failing closed on any `with` include rather than scoping it incorrectly.
   const schema = (db as { _?: { schema?: Record<string, unknown> } } | undefined)?._?.schema;
   if (!schema || typeof schema !== "object") {
     return undefined;
@@ -57,7 +60,12 @@ function extractRelations(config: unknown): RelationalRelations {
   return relations && typeof relations === "object" ? (relations as RelationalRelations) : {};
 }
 
-/** Recover a table config's table object through one of its columns, which each hold a `.table` back-reference. */
+/**
+ * Recover a table config's table object through one of its columns, which each hold a `.table`
+ * back-reference. Drizzle's relational config does not expose the table object directly, so this reads
+ * the internal `columns[].table` link; if that shape ever changes it returns `undefined` and the table
+ * simply cannot be looked up by object, which callers treat as fail-closed for that include.
+ */
 function extractTable(config: unknown): object | undefined {
   const columns = (config as { columns?: Record<string, unknown> } | undefined)?.columns;
   if (!columns || typeof columns !== "object") {
