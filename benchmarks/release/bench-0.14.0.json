@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-07T21:30:31.251Z",
+  "gitSha": "7c441a73ec7731e4b7db9405bf56d2d33b077d3a",
+  "packageVersion": "0.14.0",
+  "runtime": {
+    "nodeVersion": "v24.14.1",
+    "platform": "linux",
+    "arch": "x64"
+  },
+  "benchmarkConfig": {
+    "createIterations": 100000,
+    "selectIterations": 50000,
+    "relationalIterations": 20000,
+    "memoryIterations": 25000
+  },
+  "samplesPerBenchmark": 5,
+  "results": [
+    {
+      "name": "memory/heap_growth_bytes",
+      "source": "memory",
+      "samples": [0, 20024, 21536, 19928, 20184],
+      "median": 20024,
+      "p75": 20184,
+      "p95": 21536,
+      "min": 0,
+      "max": 21536,
+      "unit": "bytes",
+      "comparable": true,
+      "threshold": {
+        "maxRegressionRatio": 1.3,
+        "minAbsoluteRegression": 2097152
+      }
+    },
+    {
+      "name": "relational/find_many_ms",
+      "source": "relational",
+      "samples": [
+        27.328935999999885, 24.86984099999995, 24.89383699999985, 24.54695400000014,
+        24.44453199999998
+      ],
+      "median": 24.86984099999995,
+      "p75": 24.89383699999985,
+      "p95": 27.328935999999885,
+      "min": 24.44453199999998,
+      "max": 27.328935999999885,
+      "unit": "ms",
+      "comparable": true,
+      "threshold": {
+        "maxRegressionRatio": 1.25,
+        "minAbsoluteRegression": 10
+      }
+    },
+    {
+      "name": "select/scoped_select_ms",
+      "source": "select",
+      "samples": [
+        133.838712, 123.81411300000002, 123.54540799999995, 123.563131, 123.37345399999992
+      ],
+      "median": 123.563131,
+      "p75": 123.81411300000002,
+      "p95": 133.838712,
+      "min": 123.37345399999992,
+      "max": 133.838712,
+      "unit": "ms",
+      "comparable": true,
+      "threshold": {
+        "maxRegressionRatio": 1.25,
+        "minAbsoluteRegression": 10
+      }
+    },
+    {
+      "name": "wrapper/create_scoped_db_ms",
+      "source": "wrapper",
+      "samples": [
+        63.341429000000005, 45.77151199999997, 43.431542000000036, 44.110409000000004,
+        43.39856100000003
+      ],
+      "median": 44.110409000000004,
+      "p75": 45.77151199999997,
+      "p95": 63.341429000000005,
+      "min": 43.39856100000003,
+      "max": 63.341429000000005,
+      "unit": "ms",
+      "comparable": true,
+      "threshold": {
+        "maxRegressionRatio": 1.25,
+        "minAbsoluteRegression": 10
+      }
+    }
+  ]
+}
