@@ -1,5 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
-import { relations, type SQL, sql } from "drizzle-orm";
+import * as drizzleOrm from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 
@@ -150,30 +151,45 @@ export const pgWithNotes = pgTable("with_notes", {
   body: text("body").notNull(),
 });
 
-const pgWithProjectsRelations = relations(pgWithProjects, ({ many }) => ({
-  tasks: many(pgWithTasks),
-}));
-
-const pgWithTasksRelations = relations(pgWithTasks, ({ one, many }) => ({
-  project: one(pgWithProjects, {
-    fields: [pgWithTasks.projectId],
-    references: [pgWithProjects.id],
-  }),
-  notes: many(pgWithNotes),
-}));
-
-const pgWithNotesRelations = relations(pgWithNotes, ({ one }) => ({
-  task: one(pgWithTasks, { fields: [pgWithNotes.taskId], references: [pgWithTasks.id] }),
-}));
-
-export const pgWithRelationalSchema = {
-  projectsTbl: pgWithProjects,
-  tasksTbl: pgWithTasks,
-  notesTbl: pgWithNotes,
-  pgWithProjectsRelations,
-  pgWithTasksRelations,
-  pgWithNotesRelations,
+// The RQBv1 `relations()` helper is removed on the Drizzle 1.0 RC line and its named type export is
+// gone there too, so it is accessed off the namespace (not a named import, which would fail type-checking
+// on RC) and cast to a stable local shape. The runtime helper is still Drizzle's own and is only invoked
+// on the RQBv1 matrix; RQBv1-only tests skip when it is absent.
+type RqbV1RelationHelpers = {
+  one: (table: unknown, config: unknown) => unknown;
+  many: (table: unknown) => unknown;
 };
+const rqbV1RelationsHelper = (drizzleOrm as { relations?: unknown }).relations;
+const rqbV1Relations = rqbV1RelationsHelper as (
+  table: unknown,
+  config: (helpers: RqbV1RelationHelpers) => Record<string, unknown>,
+) => unknown;
+
+/** Whether Drizzle's RQBv1 `relations()` helper is available (removed on the Drizzle 1.0 RC line). */
+export const supportsRqbV1Relations = typeof rqbV1RelationsHelper === "function";
+
+// Relations are built lazily inside the factory so importing this fixture does not call `relations()`
+// at module load, which would throw on the Drizzle 1.0 RC matrix where the helper no longer exists.
+function buildWithRelationalSchema() {
+  return {
+    projectsTbl: pgWithProjects,
+    tasksTbl: pgWithTasks,
+    notesTbl: pgWithNotes,
+    projectsRelations: rqbV1Relations(pgWithProjects, ({ many }) => ({
+      tasks: many(pgWithTasks),
+    })),
+    tasksRelations: rqbV1Relations(pgWithTasks, ({ one, many }) => ({
+      project: one(pgWithProjects, {
+        fields: [pgWithTasks.projectId],
+        references: [pgWithProjects.id],
+      }),
+      notes: many(pgWithNotes),
+    })),
+    notesRelations: rqbV1Relations(pgWithNotes, ({ one }) => ({
+      task: one(pgWithTasks, { fields: [pgWithNotes.taskId], references: [pgWithTasks.id] }),
+    })),
+  };
+}
 
 type WithRelationsConfig = {
   where?: (
@@ -222,12 +238,17 @@ const WITH_NOTES_DDL = `
   `;
 
 export async function createPgWithRelationalDb(): Promise<PgWithRelationalDb> {
+  if (!supportsRqbV1Relations) {
+    throw new Error("Drizzle RQBv1 relations() is required for the nested-`with` fixture.");
+  }
+
+  const schema = buildWithRelationalSchema();
   const client = new PGlite();
   const makeDb = drizzle as unknown as (config: {
     client: PGlite;
-    schema: typeof pgWithRelationalSchema;
+    schema: typeof schema;
   }) => PgIntegrationDb;
-  const db = makeDb({ client, schema: pgWithRelationalSchema });
+  const db = makeDb({ client, schema });
 
   await db.execute(sql.raw(WITH_PROJECTS_DDL));
   await db.execute(sql.raw(WITH_TASKS_DDL));
