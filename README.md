@@ -222,7 +222,21 @@ const project = await workspaceDb.query.projects.findFirst({
 });
 ```
 
-On RQBv2 scoped roots, callback or SQL `where` shapes are rejected so Drizzle cannot ignore them. Tables without a matching rule pass through for plain root `findFirst` / `findMany` calls, except that when any relational scoped rule is configured, relational `with` includes fail closed because nested relation rows cannot yet be scoped safely by the wrapper. Use explicit scoped joins or separate scoped queries for related rows.
+On RQBv2 scoped roots, callback or SQL `where` shapes are rejected so Drizzle cannot ignore them. Tables without a matching rule pass through for plain root `findFirst` / `findMany` calls.
+
+### Nested `with` includes
+
+On the callback/SQL relational API (Drizzle 0.45), nested `with` includes are scoped automatically: each included relation whose target table has a rule gets that rule's scope predicate injected into its own `where`, recursively, so eager-loading cannot surface another scope's rows. Included tables without a rule (e.g. a global lookup table) load normally. An include fails closed if the wrapper cannot resolve a relation to a table or a rule cannot produce its predicate.
+
+```ts
+// tasks whose target table is scoped are filtered to the current scope; unscoped `notes` load in full
+const project = await workspaceDb.query.projects.findFirst({
+  where: { AND: [{ id: projectId }, { workspaceId }] },
+  with: { tasks: { with: { notes: true } } },
+});
+```
+
+Nested `with` scoping is not yet available on the RQBv2 object-filter API (Drizzle 1.0); there, `with` includes still fail closed when relational scoped rules are configured. Use explicit scoped joins or separate scoped queries for related rows.
 
 ## Data model shape
 
@@ -403,7 +417,7 @@ Not protected:
 - raw SQL, `_unsafeUnscopedDb`, or helpers that close over the raw DB
 - query builder methods reached after `.$unsafeUnscoped()` or through `_unsafeUnscopedDb`
 - tables or joined tables without rules
-- nested relational `with` rows; scoped wrappers reject `with` includes when relational scoped rules are configured, so use explicit scoped joins or separate scoped queries
+- nested relational `with` rows on the RQBv2 object-filter API (Drizzle 1.0), which still fail closed; on the callback/SQL API (Drizzle 0.45) nested `with` includes are scoped automatically
 - invalid cross-scope rows that your database constraints allow
 - deliberate bypasses of the scoped DB capability
 

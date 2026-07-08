@@ -14,10 +14,14 @@ import {
   createPgIntegrationDb,
   createPgRelationalDb,
   createPgRqbV2RelationalDb,
+  createPgWithRelationalDb,
   pgProjects,
   pgTasks,
+  pgWithProjects,
+  pgWithTasks,
   seedPgProjects,
   seedPgTasks,
+  seedPgWithRelations,
   type PgIntegrationDb,
 } from "./fixtures/postgres";
 
@@ -289,6 +293,8 @@ describe("Postgres/PGlite integration", () => {
           expect.objectContaining({ id: "project-1", workspaceId: "workspace-1" }),
         ]);
 
+        // This schema registers no relations, so a nested include cannot resolve to a table and
+        // fails closed rather than loading unscoped rows.
         const scopedWhere = (
           project: { workspaceId: unknown },
           { eq: eqOp }: { eq: (left: unknown, right: unknown) => SQL },
@@ -296,9 +302,9 @@ describe("Postgres/PGlite integration", () => {
         expect(() =>
           scopedDb.query.projectsTbl.findMany({
             where: scopedWhere,
-            with: {},
+            with: { tasks: true },
           } as never),
-        ).toThrow("does not support nested `with` relations");
+        ).toThrow('cannot resolve nested relation "tasks"');
 
         // A relational where that omits the scope column is still rejected through the same path.
         await expect(
@@ -311,6 +317,172 @@ describe("Postgres/PGlite integration", () => {
       }
     },
   );
+
+  function createScopedWithDb(
+    db: Awaited<ReturnType<typeof createPgWithRelationalDb>>,
+    workspaceId = "workspace-1",
+  ) {
+    return createScopedDb(db, {
+      scopeName: "workspace",
+      scopeValue: workspaceId,
+      strict: false,
+      rules: [
+        scopeByColumn(pgWithProjects, pgWithProjects.workspaceId, { queryName: "projectsTbl" }),
+        scopeByColumn(pgWithTasks, pgWithTasks.workspaceId, { queryName: "tasksTbl" }),
+        // notesTbl intentionally has no rule: it is an unscoped child relation.
+      ],
+    });
+  }
+
+  it("scopes nested `with` relations to exclude cross-scope rows against the real PGlite driver", async () => {
+    const db = await createPgWithRelationalDb();
+    try {
+      await seedPgWithRelations(db);
+      const scopedDb = createScopedWithDb(db);
+
+      const projects = await scopedDb.query.projectsTbl.findMany({
+        where: (project, { eq: eqOp }) => eqOp(project.workspaceId, "workspace-1"),
+        with: { tasks: true },
+      });
+
+      // project-1 is in scope; its cross-workspace task-2 is filtered out of the nested include.
+      expect(projects).toHaveLength(1);
+      expect(projects[0]).toMatchObject({ id: "project-1" });
+      expect((projects[0]!.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual([
+        "task-1",
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("scopes deeply nested `with` includes, honors a caller nested where, and leaves unscoped children intact", async () => {
+    const db = await createPgWithRelationalDb();
+    try {
+      await seedPgWithRelations(db);
+      const scopedDb = createScopedWithDb(db);
+
+      const project = await scopedDb.query.projectsTbl.findFirst({
+        where: (p, { eq: eqOp }) => eqOp(p.id, "project-1"),
+        with: {
+          tasks: {
+            // Caller-supplied nested where (callback) is ANDed with the injected workspace scope.
+            where: (
+              t: { title: unknown },
+              { eq: eqOp }: { eq: (left: unknown, right: unknown) => SQL },
+            ) => eqOp(t.title, "In-scope task"),
+            with: {
+              // Second level of scoped nesting: task → project.
+              project: true,
+              // notes has no rule, so task-1's notes load fully (unscoped by design).
+              notes: true,
+            },
+          },
+        },
+      });
+
+      const tasks = project!.tasks as Array<{
+        id: string;
+        project: { id: string };
+        notes: unknown[];
+      }>;
+      expect(tasks.map((task) => task.id)).toEqual(["task-1"]);
+      expect(tasks[0]!.project.id).toBe("project-1");
+      expect((tasks[0]!.notes as Array<{ id: string }>).map((note) => note.id)).toEqual([
+        "note-1",
+        "note-2",
+      ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("injects scope alongside a raw SQL nested where and excludes `with: false` relations", async () => {
+    const db = await createPgWithRelationalDb();
+    try {
+      await seedPgWithRelations(db);
+      const scopedDb = createScopedWithDb(db);
+
+      // A raw SQL nested where (not a callback) is still ANDed with the injected workspace scope.
+      const withRawWhere = await scopedDb.query.projectsTbl.findFirst({
+        where: (p, { eq: eqOp }) => eqOp(p.id, "project-1"),
+        with: { tasks: { where: eq(pgWithTasks.title, "In-scope task") } as never },
+      });
+      expect((withRawWhere!.tasks as Array<{ id: string }>).map((task) => task.id)).toEqual([
+        "task-1",
+      ]);
+
+      // `with: { tasks: false }` excludes the relation entirely, so no scoping applies.
+      const withoutTasks = await scopedDb.query.projectsTbl.findFirst({
+        where: (p, { eq: eqOp }) => eqOp(p.id, "project-1"),
+        with: { tasks: false as never },
+      });
+      expect(withoutTasks).toMatchObject({ id: "project-1" });
+      expect(withoutTasks!.tasks).toBeUndefined();
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("scopes a nested include reached from an unscoped relational root", async () => {
+    const db = await createPgWithRelationalDb();
+    try {
+      await seedPgWithRelations(db);
+      const scopedDb = createScopedWithDb(db);
+
+      // notesTbl has no rule, so the root is unscoped and returns every note, but the nested `task`
+      // include reaches a scoped table, so out-of-scope tasks are filtered to null.
+      const notes = await scopedDb.query.notesTbl.findMany({ with: { task: true } });
+
+      const byId = new Map(notes.map((note) => [note.id as string, note.task]));
+      expect((byId.get("note-1") as { id: string }).id).toBe("task-1");
+      // note-3's task-3 belongs to workspace-2, so it is filtered out of the scoped include.
+      expect(byId.get("note-3")).toBeNull();
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("fails closed on a nested `with` include when a scoped rule cannot produce its predicate", async () => {
+    const db = await createPgWithRelationalDb();
+    try {
+      await seedPgWithRelations(db);
+      const scopedDb = createScopedDb(db, {
+        scopeName: "workspace",
+        scopeValue: "workspace-1",
+        strict: false,
+        rules: [
+          scopeByColumn(pgWithProjects, pgWithProjects.workspaceId, { queryName: "projectsTbl" }),
+          // A tasks rule whose predicate resolves to undefined must not silently load nested rows.
+          {
+            table: pgWithTasks,
+            queryName: "tasksTbl",
+            where: () => undefined,
+          },
+        ],
+      });
+
+      expect(() => scopedDb.query.projectsTbl.findMany({ with: { tasks: true } })).toThrow(
+        "did not produce a scope predicate",
+      );
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("fails closed when a nested relation cannot be resolved to a scoped table", async () => {
+    const db = await createPgWithRelationalDb();
+    try {
+      await seedPgWithRelations(db);
+      const scopedDb = createScopedWithDb(db);
+
+      expect(() =>
+        scopedDb.query.projectsTbl.findMany({ with: { nonexistent: true } as never }),
+      ).toThrow('cannot resolve nested relation "nonexistent"');
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
 
   const supportsRqbV2RelationalQuery = "defineRelations" in (drizzleOrm as Record<string, unknown>);
 

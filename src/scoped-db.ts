@@ -16,6 +16,7 @@ import {
   normalizeOptions,
 } from "./internal/options.js";
 import { createRelationalWithGuard, createScopedTableQuery } from "./internal/relational.js";
+import { createRelationalSchemaResolver } from "./internal/relational/schema.js";
 import { createScopedSelectBuilder } from "./internal/select.js";
 
 /** Create a Drizzle wrapper that injects declared table scope predicates. */
@@ -56,6 +57,7 @@ function createScopedDbInternal<
   const dbRecord = db as DrizzleLikeDb;
   const wrappedTableQueryCache = new Map<string, unknown>();
   const rawQuery = dbRecord.query;
+  const relationalSchema = rawQuery ? createRelationalSchemaResolver(db) : undefined;
   const queryProxy = rawQuery
     ? new Proxy(rawQuery, {
         get(target, prop: string | symbol) {
@@ -83,13 +85,18 @@ function createScopedDbInternal<
           if (!rule) {
             const unscopedWrapped =
               options.rulesByQueryName.size > 0
-                ? createRelationalWithGuard(relationalTableQuery, prop)
+                ? createRelationalWithGuard(relationalTableQuery, prop, options, relationalSchema)
                 : tableQuery;
             wrappedTableQueryCache.set(prop, unscopedWrapped);
             return unscopedWrapped;
           }
 
-          const wrapped = createScopedTableQuery(relationalTableQuery, rule, options);
+          const wrapped = createScopedTableQuery(
+            relationalTableQuery,
+            rule,
+            options,
+            relationalSchema,
+          );
           wrappedTableQueryCache.set(prop, wrapped);
           return wrapped;
         },
