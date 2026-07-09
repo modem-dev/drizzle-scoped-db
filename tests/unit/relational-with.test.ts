@@ -1,10 +1,20 @@
+import { eq } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
 import { normalizeOptions, type NormalizedCreateScopedDbOptions } from "../../src/internal/options";
-import { createRelationalSchemaResolver } from "../../src/internal/relational/schema";
+import { createRelationalWithGuard, createScopedTableQuery } from "../../src/internal/relational";
+import {
+  createRelationalSchemaResolver,
+  type RelationalSchemaResolver,
+} from "../../src/internal/relational/schema";
 import { scopeRelationalWith } from "../../src/internal/relational/with-scoping";
 import { scopeByColumn } from "../../src/rules";
+
+const scopedProjects = pgTable("scoped_projects", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+});
 
 const scopedTasks = pgTable("scoped_tasks", {
   id: text("id").primaryKey(),
@@ -13,6 +23,19 @@ const scopedTasks = pgTable("scoped_tasks", {
 
 function options(): NormalizedCreateScopedDbOptions<string> {
   return normalizeOptions({ scopeName: "workspace", scopeValue: "workspace-1", rules: [] });
+}
+
+/** A fake RQBv1 relational table query (no V2 entity kind) that records the config it receives. */
+function fakeRqbV1Query() {
+  const calls: Array<Record<string, unknown>> = [];
+  return {
+    calls,
+    findFirst: async () => undefined,
+    findMany: async (config: Record<string, unknown> = {}) => {
+      calls.push(config);
+      return [];
+    },
+  };
 }
 
 describe("createRelationalSchemaResolver", () => {
@@ -114,5 +137,134 @@ describe("scopeRelationalWith", () => {
     const composed = scoped.with.tasks.where({}, {});
     expect(composed).toBeDefined();
     expect(composed).toHaveProperty("queryChunks");
+  });
+
+  it("passes `with: { rel: false }` through untouched", () => {
+    const scoped = scopeRelationalWith(
+      { with: { tasks: false } },
+      { tasks: { referencedTable: scopedTasks } },
+      passthroughResolver,
+      options(),
+      "root",
+    ) as { with: { tasks: unknown } };
+    expect(scoped.with.tasks).toBe(false);
+  });
+
+  it("ands a raw SQL nested where with the injected scope", () => {
+    const scopedOptions = normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(scopedTasks, scopedTasks.workspaceId)],
+    });
+
+    const scoped = scopeRelationalWith(
+      { with: { tasks: { where: eq(scopedTasks.id, "task-1") } } },
+      { tasks: { referencedTable: scopedTasks } },
+      passthroughResolver,
+      scopedOptions,
+      "root",
+    ) as { with: { tasks: { where: unknown } } };
+
+    // A raw SQL nested where (not a callback) is ANDed with the injected scope into one SQL condition.
+    expect(scoped.with.tasks.where).toHaveProperty("queryChunks");
+  });
+
+  it("fails closed when a nested relation key is absent from the parent's relations", () => {
+    expect(() =>
+      scopeRelationalWith(
+        { with: { ghost: true } },
+        { other: { referencedTable: scopedTasks } },
+        passthroughResolver,
+        options(),
+        "root",
+      ),
+    ).toThrow('cannot resolve nested relation "ghost"');
+  });
+
+  it("ands a truthy caller nested where with the injected scope and recurses under named tables", () => {
+    const scopedOptions = normalizeOptions({
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      rules: [scopeByColumn(scopedTasks, scopedTasks.workspaceId)],
+    });
+    const leaf = { kind: "leaf" };
+    const resolver: RelationalSchemaResolver = {
+      relationsForTsName: () => undefined,
+      relationsForTable: (table) =>
+        table === scopedTasks ? { deeper: { referencedTable: leaf } } : undefined,
+    };
+
+    const scoped = scopeRelationalWith(
+      {
+        with: {
+          tasks: {
+            where: () => eq(scopedTasks.workspaceId, "workspace-1"),
+            with: { deeper: true },
+          },
+        },
+      },
+      { tasks: { referencedTable: scopedTasks } },
+      resolver,
+      scopedOptions,
+      "root",
+    ) as {
+      with: {
+        tasks: { where: (f: unknown, o: unknown) => unknown; with: Record<string, unknown> };
+      };
+    };
+
+    // Caller predicate is truthy, so it is ANDed with the injected scope rather than replaced.
+    expect(scoped.with.tasks.where({}, {})).toHaveProperty("queryChunks");
+    // Recursion continued into the deeper include (labelled by the named `scoped_tasks` table).
+    expect(scoped.with.tasks.with.deeper).toEqual({});
+  });
+});
+
+describe("RQBv1 relational adapter with-scoping", () => {
+  const projectsRule = scopeByColumn(scopedProjects, scopedProjects.workspaceId, {
+    queryName: "projectsTbl",
+  });
+  const tasksRule = scopeByColumn(scopedTasks, scopedTasks.workspaceId, { queryName: "tasksTbl" });
+  const scopedOptions = normalizeOptions({
+    scopeName: "workspace",
+    scopeValue: "workspace-1",
+    strict: false,
+    rules: [projectsRule, tasksRule],
+  });
+  const resolver = createRelationalSchemaResolver({
+    _: {
+      schema: {
+        projectsTbl: {
+          relations: { tasks: { referencedTable: scopedTasks } },
+          columns: { workspaceId: scopedProjects.workspaceId },
+        },
+        tasksTbl: { relations: {}, columns: { workspaceId: scopedTasks.workspaceId } },
+      },
+    },
+  }) as RelationalSchemaResolver;
+
+  it("injects the nested table's scope predicate into a scoped root include", async () => {
+    const query = fakeRqbV1Query();
+    const wrapped = createScopedTableQuery(query, projectsRule, scopedOptions, resolver);
+
+    await wrapped.findMany({ with: { tasks: true } });
+
+    const scopedWith = query.calls[0]?.with as { tasks?: { where?: unknown } };
+    expect(scopedWith.tasks?.where).toBeDefined();
+  });
+
+  it("scopes a nested include reached from an unscoped relational root", async () => {
+    const guardResolver: RelationalSchemaResolver = {
+      relationsForTsName: (tsName) =>
+        tsName === "notesTbl" ? { task: { referencedTable: scopedTasks } } : undefined,
+      relationsForTable: () => undefined,
+    };
+    const query = fakeRqbV1Query();
+    const guarded = createRelationalWithGuard(query, "notesTbl", scopedOptions, guardResolver);
+
+    await guarded.findMany({ with: { task: true } });
+
+    const scopedWith = query.calls[0]?.with as { task?: { where?: unknown } };
+    expect(scopedWith.task?.where).toBeDefined();
   });
 });
