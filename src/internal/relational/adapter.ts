@@ -1,5 +1,6 @@
 import type { NormalizedCreateScopedDbOptions } from "../options.js";
 import type { ScopedTableRule } from "../../types.js";
+import type { RelationalSchemaResolver } from "./schema.js";
 
 export type RelationalTableQuery = { findFirst: unknown; findMany: unknown };
 export type RelationalMethodName = "findFirst" | "findMany";
@@ -26,6 +27,7 @@ export interface RelationalQueryAdapter {
     tableQuery: TTableQuery,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
+    relationalSchema: RelationalSchemaResolver | undefined,
   ): TTableQuery;
 }
 

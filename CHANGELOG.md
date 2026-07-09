@@ -4,6 +4,14 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Scope nested relational `with` includes on the callback/SQL relational query API (Drizzle 0.45). Each included relation whose target table has a rule now has that rule's scope predicate injected into its own `where`, recursively, so eager-loaded relations cannot surface another scope's rows. Included tables without a rule load normally, and an include fails closed when the wrapper cannot resolve a relation to a table or a rule cannot produce its predicate.
+
+### Changed
+
+- Relational `with` includes on the callback/SQL API are now scoped instead of rejected. They previously failed closed with "does not support nested `with` relations". The RQBv2 object-filter API (Drizzle 1.0) still fails closed on `with` until object-filter injection into nested relations is supported.
+
 ## [0.14.0] - 2026-07-07
 
 ### Breaking changes

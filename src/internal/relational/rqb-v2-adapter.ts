@@ -31,6 +31,8 @@ export class RqbV2RelationalAdapter implements RelationalQueryAdapter {
     tableQuery: TTableQuery,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
+    // RQBv2 nested `with` scoping (object-filter injection) is not yet supported; includes fail closed.
+    _relationalSchema?: unknown,
   ): TTableQuery {
     return {
       findFirst: this.wrapMethod(bindRelationalMethod(tableQuery, "findFirst"), rule, options),

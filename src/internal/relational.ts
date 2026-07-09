@@ -9,6 +9,8 @@ import {
 } from "./relational/adapter.js";
 import { RqbV1RelationalAdapter } from "./relational/rqb-v1-adapter.js";
 import { RqbV2RelationalAdapter } from "./relational/rqb-v2-adapter.js";
+import type { RelationalSchemaResolver } from "./relational/schema.js";
+import { scopeRelationalWith } from "./relational/with-scoping.js";
 
 const RELATIONAL_ADAPTERS: RelationalQueryAdapter[] = [
   new RqbV2RelationalAdapter(),
@@ -20,32 +22,57 @@ export function createScopedTableQuery<TScope, TTableQuery extends RelationalTab
   tableQuery: TTableQuery,
   rule: ScopedTableRule<TScope>,
   options: NormalizedCreateScopedDbOptions<TScope>,
+  relationalSchema: RelationalSchemaResolver | undefined,
 ): TTableQuery {
-  return getRelationalAdapter(tableQuery).wrap(tableQuery, rule, options);
+  return getRelationalAdapter(tableQuery).wrap(tableQuery, rule, options, relationalSchema);
 }
 
-/** Wrap unscoped relational roots just enough to reject unsafe nested scoped includes. */
-export function createRelationalWithGuard<TTableQuery extends RelationalTableQuery>(
+/**
+ * Wrap an unscoped relational root. The root table itself is unscoped, but any nested `with` includes
+ * that reach scoped tables still have their scope predicates injected (and fail closed when the
+ * relational schema is unavailable), so an unscoped root cannot be used to load unscoped nested rows.
+ */
+export function createRelationalWithGuard<TScope, TTableQuery extends RelationalTableQuery>(
   tableQuery: TTableQuery,
   queryName: string,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+  relationalSchema: RelationalSchemaResolver | undefined,
 ): TTableQuery {
   return new Proxy(tableQuery, {
     get(target, prop, receiver) {
       if (prop === "findFirst" || prop === "findMany") {
-        return wrapWithGuard(bindRelationalMethod(target, prop), queryName);
+        return wrapWithGuard(
+          bindRelationalMethod(target, prop),
+          queryName,
+          options,
+          relationalSchema,
+        );
       }
       return Reflect.get(target, prop, receiver);
     },
   });
 }
 
-function wrapWithGuard<TResult>(
+function wrapWithGuard<TScope, TResult>(
   originalMethod: RelationalMethod<unknown, TResult>,
   queryName: string,
+  options: NormalizedCreateScopedDbOptions<TScope>,
+  relationalSchema: RelationalSchemaResolver | undefined,
 ): RelationalMethod<unknown, TResult> {
   return (config) => {
-    assertNoRelationalWith(config, queryName);
-    return originalMethod(config);
+    if (!relationalSchema) {
+      assertNoRelationalWith(config, queryName);
+      return originalMethod(config);
+    }
+
+    const scopedConfig = scopeRelationalWith(
+      config as Record<string, unknown> | undefined,
+      relationalSchema.relationsForTsName(queryName),
+      relationalSchema,
+      options,
+      queryName,
+    );
+    return originalMethod(scopedConfig);
   };
 }
 

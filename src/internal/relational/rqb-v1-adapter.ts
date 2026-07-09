@@ -15,6 +15,8 @@ import {
   type RelationalQueryAdapter,
   type RelationalTableQuery,
 } from "./adapter.js";
+import type { RelationalSchemaResolver } from "./schema.js";
+import { scopeRelationalWith } from "./with-scoping.js";
 
 /** Adapter for Drizzle's callback/SQL relational query API. */
 export class RqbV1RelationalAdapter implements RelationalQueryAdapter {
@@ -28,10 +30,21 @@ export class RqbV1RelationalAdapter implements RelationalQueryAdapter {
     tableQuery: TTableQuery,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
+    relationalSchema: RelationalSchemaResolver | undefined,
   ): TTableQuery {
     return {
-      findFirst: this.wrapMethod(bindRelationalMethod(tableQuery, "findFirst"), rule, options),
-      findMany: this.wrapMethod(bindRelationalMethod(tableQuery, "findMany"), rule, options),
+      findFirst: this.wrapMethod(
+        bindRelationalMethod(tableQuery, "findFirst"),
+        rule,
+        options,
+        relationalSchema,
+      ),
+      findMany: this.wrapMethod(
+        bindRelationalMethod(tableQuery, "findMany"),
+        rule,
+        options,
+        relationalSchema,
+      ),
     } as TTableQuery;
   }
 
@@ -40,10 +53,11 @@ export class RqbV1RelationalAdapter implements RelationalQueryAdapter {
     originalMethod: RelationalMethod<RelationalWhere<unknown>, TResult>,
     rule: ScopedTableRule<TScope>,
     options: NormalizedCreateScopedDbOptions<TScope>,
+    relationalSchema: RelationalSchemaResolver | undefined,
   ): (config?: RelationalMethodConfig<RelationalWhere<unknown>>) => Promise<TResult> {
     return (config) => {
-      assertNoRelationalWith(config, getRuleTableName(rule));
-      const originalWhere = config?.where;
+      const scopedConfig = this.scopeIncludes(config, rule, options, relationalSchema);
+      const originalWhere = scopedConfig?.where;
 
       if (originalWhere === undefined && isStrictMode(options)) {
         throw createMissingWhereError(getRuleTableName(rule), options);
@@ -57,9 +71,33 @@ export class RqbV1RelationalAdapter implements RelationalQueryAdapter {
       };
 
       return originalMethod({
-        ...config,
+        ...scopedConfig,
         where: wrappedWhere,
       });
     };
+  }
+
+  /**
+   * Inject scope predicates into nested `with` includes. Fails closed for nested includes when the
+   * relational schema is unavailable, since without it a nested relation cannot be scoped.
+   */
+  private scopeIncludes<TScope>(
+    config: RelationalMethodConfig<RelationalWhere<unknown>> | undefined,
+    rule: ScopedTableRule<TScope>,
+    options: NormalizedCreateScopedDbOptions<TScope>,
+    relationalSchema: RelationalSchemaResolver | undefined,
+  ): RelationalMethodConfig<RelationalWhere<unknown>> | undefined {
+    if (!relationalSchema) {
+      assertNoRelationalWith(config, getRuleTableName(rule));
+      return config;
+    }
+
+    return scopeRelationalWith(
+      config,
+      relationalSchema.relationsForTable(rule.table),
+      relationalSchema,
+      options,
+      getRuleTableName(rule),
+    ) as RelationalMethodConfig<RelationalWhere<unknown>> | undefined;
   }
 }
