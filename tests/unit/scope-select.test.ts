@@ -60,36 +60,7 @@ describe("createScopedDb select guardrails", () => {
   });
 
   it("starts the underlying thenable before a subsequently queued modifier", async () => {
-    type Row = { id: string };
-    type RawBuilder = Promise<Row[]> & { limit(n: number): RawBuilder };
-    let rawBuilder: RawBuilder;
-    rawBuilder = Object.assign(Promise.resolve([{ id: "project-1" }]), {
-      limit: vi.fn(() => rawBuilder),
-    });
-    const rawThen = vi.spyOn(rawBuilder, "then");
-    const rawDb = {
-      select() {
-        return {
-          from() {
-            return {
-              where() {
-                return rawBuilder;
-              },
-            };
-          },
-        };
-      },
-    } as unknown as ReturnType<typeof createFakeDb>;
-    const scopedDb = createScopedDb(rawDb, {
-      scopeName: "workspace",
-      scopeValue: "workspace-1",
-      strict: false,
-      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
-    });
-    const query = scopedDb
-      .select({ id: projectsTbl.id })
-      .from(projectsTbl)
-      .where(eq(projectsTbl.workspaceId, "workspace-1"));
+    const { query, rawBuilder, rawThen } = createThenableSelectHarness();
     let rawThenCallsBeforeModifier: number | undefined;
     let limitedQuery: typeof query | undefined;
 
@@ -103,6 +74,16 @@ describe("createScopedDb select guardrails", () => {
     expect(rawBuilder.limit).toHaveBeenCalledOnce();
     expect(limitedQuery).toBeDefined();
     await expect(limitedQuery).resolves.toEqual([{ id: "project-1" }]);
+  });
+
+  it("rejects when the underlying thenable throws synchronously", async () => {
+    const { query, rawThen } = createThenableSelectHarness();
+    const error = new Error("query execution failed");
+    rawThen.mockImplementationOnce(() => {
+      throw error;
+    });
+
+    await expect(query).rejects.toBe(error);
   });
 
   it("throws when a scoped select is executed without where because strict mode is the default", () => {
@@ -377,6 +358,41 @@ describe("createScopedDb select guardrails", () => {
     expect(rawDb._state.havingCondition).toBe(havingCondition);
   });
 });
+
+function createThenableSelectHarness() {
+  type Row = { id: string };
+  type RawBuilder = Promise<Row[]> & { limit(n: number): RawBuilder };
+  let rawBuilder: RawBuilder;
+  rawBuilder = Object.assign(Promise.resolve([{ id: "project-1" }]), {
+    limit: vi.fn(() => rawBuilder),
+  });
+  const rawThen = vi.spyOn(rawBuilder, "then");
+  const rawDb = {
+    select() {
+      return {
+        from() {
+          return {
+            where() {
+              return rawBuilder;
+            },
+          };
+        },
+      };
+    },
+  } as unknown as ReturnType<typeof createFakeDb>;
+  const scopedDb = createScopedDb(rawDb, {
+    scopeName: "workspace",
+    scopeValue: "workspace-1",
+    strict: false,
+    rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+  });
+  const query = scopedDb
+    .select({ id: projectsTbl.id })
+    .from(projectsTbl)
+    .where(eq(projectsTbl.workspaceId, "workspace-1"));
+
+  return { query, rawBuilder, rawThen };
+}
 
 function countColumnReferences(condition: SQL | undefined, columnName: string): number {
   const chunks = (condition as { queryChunks?: unknown[] } | undefined)?.queryChunks;

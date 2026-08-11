@@ -96,15 +96,16 @@ function createScopedWhereBuilder<TResult>(
   let currentBuilder = rawBuilder;
   let executionStarted = !isThenable;
   const execution = isThenable
-    ? Promise.resolve({
-        // oxlint-disable-next-line unicorn/no-thenable -- Starts Drizzle in the first microtask while sharing one native Promise.
-        then<TResult1 = TResult, TResult2 = never>(
-          onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
-          onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
-        ): PromiseLike<TResult1 | TResult2> {
+    ? new Promise<TResult>((resolve, reject) => {
+        // Synchronous modifiers share this promise before Drizzle starts in the first microtask.
+        queueMicrotask(() => {
           executionStarted = true;
-          return currentBuilder.then(onfulfilled, onrejected);
-        },
+          try {
+            currentBuilder.then(resolve, reject);
+          } catch (error) {
+            reject(error);
+          }
+        });
       })
     : Promise.resolve(rawBuilder as TResult);
 
