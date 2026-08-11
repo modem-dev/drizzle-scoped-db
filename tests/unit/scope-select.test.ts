@@ -59,10 +59,12 @@ describe("createScopedDb select guardrails", () => {
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(false);
   });
 
-  it("starts the underlying thenable before a subsequently queued modifier", async () => {
+  it("starts query execution in the first microtask before later queued modifiers", async () => {
     const { query, rawBuilder, rawThen } = createThenableSelectHarness();
     let rawThenCallsBeforeModifier: number | undefined;
     let limitedQuery: typeof query | undefined;
+
+    expect(rawThen).not.toHaveBeenCalled();
 
     queueMicrotask(() => {
       rawThenCallsBeforeModifier = rawThen.mock.calls.length;
