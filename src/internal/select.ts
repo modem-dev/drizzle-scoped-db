@@ -92,25 +92,58 @@ function createScopedWhereBuilder<TResult>(
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
   rawBuilder: any,
 ): ScopedWhereBuilder<TResult> {
-  const promise = Promise.resolve(rawBuilder) as Promise<TResult>;
-  const facade = {
+  const state = { builder: rawBuilder, started: false };
+  const execution =
+    typeof rawBuilder?.then === "function"
+      ? Promise.resolve({
+          // oxlint-disable-next-line unicorn/no-thenable -- Defers Drizzle's thenable assimilation until this shared execution starts.
+          then<TResult1 = TResult, TResult2 = never>(
+            onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
+            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+          ): PromiseLike<TResult1 | TResult2> {
+            state.started = true;
+            return state.builder.then(onfulfilled, onrejected);
+          },
+        })
+      : Promise.resolve(rawBuilder as TResult);
+  if (typeof rawBuilder?.then !== "function") {
+    state.started = true;
+  }
+
+  let facade: ScopedWhereBuilder<TResult>;
+  facade = Object.assign(execution, {
     limit(n: number): ScopedWhereBuilder<TResult> {
-      return createScopedWhereBuilder<TResult>(rawBuilder.limit(n));
+      const builder = state.builder.limit(n);
+      if (state.started) return createScopedWhereBuilder<TResult>(builder);
+      state.builder = builder;
+      return facade;
     },
     offset(n: number): ScopedWhereBuilder<TResult> {
-      return createScopedWhereBuilder<TResult>(rawBuilder.offset(n));
+      const builder = state.builder.offset(n);
+      if (state.started) return createScopedWhereBuilder<TResult>(builder);
+      state.builder = builder;
+      return facade;
     },
     // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
     orderBy(...columns: any[]): ScopedWhereBuilder<TResult> {
-      return createScopedWhereBuilder<TResult>(rawBuilder.orderBy(...columns));
+      const builder = state.builder.orderBy(...columns);
+      if (state.started) return createScopedWhereBuilder<TResult>(builder);
+      state.builder = builder;
+      return facade;
     },
     // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
     groupBy(...columns: any[]): ScopedWhereBuilder<TResult> {
-      return createScopedWhereBuilder<TResult>(rawBuilder.groupBy(...columns));
+      const builder = state.builder.groupBy(...columns);
+      if (state.started) return createScopedWhereBuilder<TResult>(builder);
+      state.builder = builder;
+      return facade;
     },
     having(condition: SQL | undefined): ScopedWhereBuilder<TResult> {
-      return createScopedWhereBuilder<TResult>(rawBuilder.having(condition));
+      const builder = state.builder.having(condition);
+      if (state.started) return createScopedWhereBuilder<TResult>(builder);
+      state.builder = builder;
+      return facade;
     },
-  };
-  return Object.assign(promise, facade) as ScopedWhereBuilder<TResult>;
+  });
+  return facade;
 }

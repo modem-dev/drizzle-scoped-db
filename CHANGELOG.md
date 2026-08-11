@@ -4,6 +4,10 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Share one scoped select execution through synchronous post-`where` chaining, so one awaited query executes once instead of once per chained modifier.
+
 ## [0.15.0] - 2026-07-26
 
 ### Added
