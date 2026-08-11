@@ -59,6 +59,30 @@ describe("Postgres/PGlite integration", () => {
     }
   });
 
+  it("executes a chained scoped select once against the real PGlite driver", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      await db.execute(sql.raw("create sequence integration_select_execution_count"));
+      const scopedDb = createScopedPgDb(db);
+
+      const rows = await scopedDb
+        .select({
+          id: pgProjects.id,
+          executionMarker: sql<number>`nextval('integration_select_execution_count')::integer`,
+        })
+        .from(pgProjects)
+        .where(eq(pgProjects.id, "project-1"))
+        .orderBy(pgProjects.id)
+        .limit(10)
+        .offset(0);
+
+      expect(rows).toEqual([{ id: "project-1", executionMarker: 1 }]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
   it("scopes inner joins against the real PGlite driver", async () => {
     const db = await createPgIntegrationDb();
     try {
