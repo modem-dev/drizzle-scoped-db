@@ -92,22 +92,34 @@ function createScopedWhereBuilder<TResult>(
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
   rawBuilder: any,
 ): ScopedWhereBuilder<TResult> {
-  const isThenable = typeof rawBuilder?.then === "function";
   let currentBuilder = rawBuilder;
-  let executionStarted = !isThenable;
-  const execution = isThenable
-    ? new Promise<TResult>((resolve, reject) => {
-        // Synchronous modifiers share this promise before Drizzle starts in the first microtask.
-        queueMicrotask(() => {
-          executionStarted = true;
-          try {
-            currentBuilder.then(resolve, reject);
-          } catch (error) {
-            reject(error);
-          }
-        });
-      })
-    : Promise.resolve(rawBuilder as TResult);
+  let executionStarted = false;
+  const execution = new Promise<TResult>((resolve, reject) => {
+    let isThenable: boolean;
+    try {
+      isThenable = typeof rawBuilder?.then === "function";
+    } catch (error) {
+      executionStarted = true;
+      reject(error);
+      return;
+    }
+
+    if (!isThenable) {
+      executionStarted = true;
+      resolve(rawBuilder as TResult);
+      return;
+    }
+
+    // Synchronous modifiers share this promise before Drizzle starts in the first microtask.
+    queueMicrotask(() => {
+      executionStarted = true;
+      try {
+        currentBuilder.then(resolve, reject);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 
   let facade: ScopedWhereBuilder<TResult>;
   function continueWith(nextBuilder: unknown): ScopedWhereBuilder<TResult> {

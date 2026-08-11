@@ -88,6 +88,26 @@ describe("createScopedDb select guardrails", () => {
     await expect(query).rejects.toBe(error);
   });
 
+  it("rejects when reading the underlying thenable throws", async () => {
+    const error = new Error("query execution lookup failed");
+    const rawBuilder = new Proxy(
+      {},
+      {
+        get(_target, property) {
+          if (property === "then") {
+            throw error;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const query = createScopedSelectQuery(rawBuilder);
+
+    expect(query).toBeInstanceOf(Promise);
+    await expect(query).rejects.toBe(error);
+  });
+
   it("throws when a scoped select is executed without where because strict mode is the default", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
@@ -369,6 +389,12 @@ function createThenableSelectHarness() {
     limit: vi.fn(() => rawBuilder),
   });
   const rawThen = vi.spyOn(rawBuilder, "then");
+  const query = createScopedSelectQuery(rawBuilder);
+
+  return { query, rawBuilder, rawThen };
+}
+
+function createScopedSelectQuery(rawBuilder: unknown) {
   const rawDb = {
     select() {
       return {
@@ -388,12 +414,10 @@ function createThenableSelectHarness() {
     strict: false,
     rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
   });
-  const query = scopedDb
+  return scopedDb
     .select({ id: projectsTbl.id })
     .from(projectsTbl)
     .where(eq(projectsTbl.workspaceId, "workspace-1"));
-
-  return { query, rawBuilder, rawThen };
 }
 
 function countColumnReferences(condition: SQL | undefined, columnName: string): number {
