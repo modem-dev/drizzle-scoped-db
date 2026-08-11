@@ -59,6 +59,52 @@ describe("createScopedDb select guardrails", () => {
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(false);
   });
 
+  it("starts the underlying thenable before a subsequently queued modifier", async () => {
+    type Row = { id: string };
+    type RawBuilder = Promise<Row[]> & { limit(n: number): RawBuilder };
+    let rawBuilder: RawBuilder;
+    rawBuilder = Object.assign(Promise.resolve([{ id: "project-1" }]), {
+      limit: vi.fn(() => rawBuilder),
+    });
+    const rawThen = vi.spyOn(rawBuilder, "then");
+    const rawDb = {
+      select() {
+        return {
+          from() {
+            return {
+              where() {
+                return rawBuilder;
+              },
+            };
+          },
+        };
+      },
+    } as unknown as ReturnType<typeof createFakeDb>;
+    const scopedDb = createScopedDb(rawDb, {
+      scopeName: "workspace",
+      scopeValue: "workspace-1",
+      strict: false,
+      rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+    });
+    const query = scopedDb
+      .select({ id: projectsTbl.id })
+      .from(projectsTbl)
+      .where(eq(projectsTbl.workspaceId, "workspace-1"));
+    let rawThenCallsBeforeModifier: number | undefined;
+    let limitedQuery: typeof query | undefined;
+
+    queueMicrotask(() => {
+      rawThenCallsBeforeModifier = rawThen.mock.calls.length;
+      limitedQuery = query.limit(1);
+    });
+
+    await expect(query).resolves.toEqual([{ id: "project-1" }]);
+    expect(rawThenCallsBeforeModifier).toBe(1);
+    expect(rawBuilder.limit).toHaveBeenCalledOnce();
+    expect(limitedQuery).toBeDefined();
+    await expect(limitedQuery).resolves.toEqual([{ id: "project-1" }]);
+  });
+
   it("throws when a scoped select is executed without where because strict mode is the default", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
