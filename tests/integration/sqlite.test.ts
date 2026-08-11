@@ -95,6 +95,41 @@ describe("SQLite/sql.js integration", () => {
     }
   });
 
+  it("starts execution before a subsequently queued modifier", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      let executionCount = 0;
+      harness.client.create_function("record_execution", () => {
+        executionCount += 1;
+        return executionCount;
+      });
+      const scopedDb = createScopedSqliteDb(harness.db);
+      const query = scopedDb
+        .select({
+          id: sqliteProjects.id,
+          executionMarker: sql<number>`record_execution()`,
+        })
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"))
+        .orderBy(sqliteProjects.id);
+      let executionCountBeforeModifier: number | undefined;
+      let limitedQuery: Promise<{ id: string; executionMarker: number }[]> | undefined;
+
+      queueMicrotask(() => {
+        executionCountBeforeModifier = executionCount;
+        limitedQuery = query.limit(1);
+      });
+
+      await expect(query).resolves.toEqual([{ id: "project-1", executionMarker: 1 }]);
+      expect(executionCountBeforeModifier).toBe(1);
+      expect(limitedQuery).toBeDefined();
+      await expect(limitedQuery).resolves.toEqual([{ id: "project-1", executionMarker: 2 }]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
   it("executes again when a settled scoped select is modified", async () => {
     const harness = await createSqliteIntegrationDb();
     try {

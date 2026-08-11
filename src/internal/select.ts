@@ -92,57 +92,46 @@ function createScopedWhereBuilder<TResult>(
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
   rawBuilder: any,
 ): ScopedWhereBuilder<TResult> {
-  const state = { builder: rawBuilder, started: false };
-  const execution =
-    typeof rawBuilder?.then === "function"
-      ? Promise.resolve({
-          // oxlint-disable-next-line unicorn/no-thenable -- Defers Drizzle's thenable assimilation until this shared execution starts.
-          then<TResult1 = TResult, TResult2 = never>(
-            onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
-            onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
-          ): PromiseLike<TResult1 | TResult2> {
-            state.started = true;
-            return state.builder.then(onfulfilled, onrejected);
-          },
-        })
-      : Promise.resolve(rawBuilder as TResult);
-  if (typeof rawBuilder?.then !== "function") {
-    state.started = true;
-  }
+  const isThenable = typeof rawBuilder?.then === "function";
+  let currentBuilder = rawBuilder;
+  let executionStarted = !isThenable;
+  const execution = isThenable
+    ? Promise.resolve({
+        // oxlint-disable-next-line unicorn/no-thenable -- Starts Drizzle in the first microtask while sharing one native Promise.
+        then<TResult1 = TResult, TResult2 = never>(
+          onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
+          onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+        ): PromiseLike<TResult1 | TResult2> {
+          executionStarted = true;
+          return currentBuilder.then(onfulfilled, onrejected);
+        },
+      })
+    : Promise.resolve(rawBuilder as TResult);
 
   let facade: ScopedWhereBuilder<TResult>;
+  function continueWith(nextBuilder: unknown): ScopedWhereBuilder<TResult> {
+    if (executionStarted) return createScopedWhereBuilder<TResult>(nextBuilder);
+    currentBuilder = nextBuilder;
+    return facade;
+  }
+
   facade = Object.assign(execution, {
     limit(n: number): ScopedWhereBuilder<TResult> {
-      const builder = state.builder.limit(n);
-      if (state.started) return createScopedWhereBuilder<TResult>(builder);
-      state.builder = builder;
-      return facade;
+      return continueWith(currentBuilder.limit(n));
     },
     offset(n: number): ScopedWhereBuilder<TResult> {
-      const builder = state.builder.offset(n);
-      if (state.started) return createScopedWhereBuilder<TResult>(builder);
-      state.builder = builder;
-      return facade;
+      return continueWith(currentBuilder.offset(n));
     },
     // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
     orderBy(...columns: any[]): ScopedWhereBuilder<TResult> {
-      const builder = state.builder.orderBy(...columns);
-      if (state.started) return createScopedWhereBuilder<TResult>(builder);
-      state.builder = builder;
-      return facade;
+      return continueWith(currentBuilder.orderBy(...columns));
     },
     // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
     groupBy(...columns: any[]): ScopedWhereBuilder<TResult> {
-      const builder = state.builder.groupBy(...columns);
-      if (state.started) return createScopedWhereBuilder<TResult>(builder);
-      state.builder = builder;
-      return facade;
+      return continueWith(currentBuilder.groupBy(...columns));
     },
     having(condition: SQL | undefined): ScopedWhereBuilder<TResult> {
-      const builder = state.builder.having(condition);
-      if (state.started) return createScopedWhereBuilder<TResult>(builder);
-      state.builder = builder;
-      return facade;
+      return continueWith(currentBuilder.having(condition));
     },
   });
   return facade;
