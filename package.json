@@ -1,5 +1,5 @@
 {
-  "name": "@modemdev/drizzle-scoped-db",
+  "name": "@modem-dev/drizzle-scoped-db",
   "version": "0.15.0",
   "description": "Typed tenant scoping for Drizzle ORM query builders",
   "keywords": [
