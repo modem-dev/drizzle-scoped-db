@@ -46,6 +46,79 @@ describe("SQLite/sql.js integration", () => {
     }
   });
 
+  it("executes a chained scoped select once", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      const scopedDb = createScopedSqliteDb(harness.db);
+      let executionCount = 0;
+      harness.client.create_function("record_execution", () => {
+        executionCount += 1;
+        return executionCount;
+      });
+
+      const query = scopedDb
+        .select({
+          workspaceId: sqliteProjects.workspaceId,
+          projectCount: sql<number>`count(*)`,
+          executionMarker: sql<number>`record_execution()`,
+        })
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.id, "project-1"))
+        .groupBy(sqliteProjects.workspaceId)
+        .having(eq(sqliteProjects.workspaceId, "workspace-1"))
+        .orderBy(sqliteProjects.workspaceId)
+        .limit(10)
+        .offset(0);
+
+      expect(executionCount).toBe(0);
+      expect(query).toBeInstanceOf(Promise);
+      expect(Promise.resolve(query)).toBe(query);
+
+      const onRejected = vi.fn();
+      const onFinally = vi.fn();
+      const [rows, caughtRows, finalizedRows] = await Promise.all([
+        query,
+        query.catch(onRejected),
+        query.finally(onFinally),
+      ]);
+      const expectedRows = [{ workspaceId: "workspace-1", projectCount: 1, executionMarker: 1 }];
+
+      expect(rows).toEqual(expectedRows);
+      expect(caughtRows).toEqual(expectedRows);
+      expect(finalizedRows).toEqual(expectedRows);
+      expect(executionCount).toBe(1);
+      expect(onRejected).not.toHaveBeenCalled();
+      expect(onFinally).toHaveBeenCalledOnce();
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("executes again when a settled scoped select is modified", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      await harness.db.insert(sqliteProjects).values({
+        id: "project-3",
+        workspaceId: "workspace-1",
+        slug: "project-3",
+        name: "Second scoped project",
+      });
+      const scopedDb = createScopedSqliteDb(harness.db);
+      const query = scopedDb
+        .select({ id: sqliteProjects.id })
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"))
+        .orderBy(sqliteProjects.id);
+
+      expect(await query).toEqual([{ id: "project-1" }, { id: "project-3" }]);
+      expect(await query.limit(1)).toEqual([{ id: "project-1" }]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
   it("scopes inner joins against the real SQLite Drizzle driver", async () => {
     const harness = await createSqliteIntegrationDb();
     try {

@@ -59,6 +59,55 @@ describe("createScopedDb select guardrails", () => {
     expect(containsColumnFilter(rawDb._state.selectCondition, "id")).toBe(false);
   });
 
+  it("starts query execution in the first microtask before later queued modifiers", async () => {
+    const { query, rawBuilder, rawThen } = createThenableSelectHarness();
+    let rawThenCallsBeforeModifier: number | undefined;
+    let limitedQuery: typeof query | undefined;
+
+    expect(rawThen).not.toHaveBeenCalled();
+
+    queueMicrotask(() => {
+      rawThenCallsBeforeModifier = rawThen.mock.calls.length;
+      limitedQuery = query.limit(1);
+    });
+
+    await expect(query).resolves.toEqual([{ id: "project-1" }]);
+    expect(rawThenCallsBeforeModifier).toBe(1);
+    expect(rawBuilder.limit).toHaveBeenCalledOnce();
+    expect(limitedQuery).toBeDefined();
+    await expect(limitedQuery).resolves.toEqual([{ id: "project-1" }]);
+  });
+
+  it("rejects when the underlying thenable throws synchronously", async () => {
+    const { query, rawThen } = createThenableSelectHarness();
+    const error = new Error("query execution failed");
+    rawThen.mockImplementationOnce(() => {
+      throw error;
+    });
+
+    await expect(query).rejects.toBe(error);
+  });
+
+  it("rejects when reading the underlying thenable throws", async () => {
+    const error = new Error("query execution lookup failed");
+    const rawBuilder = new Proxy(
+      {},
+      {
+        get(_target, property) {
+          if (property === "then") {
+            throw error;
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const query = createScopedSelectQuery(rawBuilder);
+
+    expect(query).toBeInstanceOf(Promise);
+    await expect(query).rejects.toBe(error);
+  });
+
   it("throws when a scoped select is executed without where because strict mode is the default", () => {
     const scopedDb = createScopedDb(createFakeDb(), {
       scopeName: "workspace",
@@ -331,6 +380,45 @@ describe("createScopedDb select guardrails", () => {
     expect(rawDb._state.havingCondition).toBe(havingCondition);
   });
 });
+
+function createThenableSelectHarness() {
+  type Row = { id: string };
+  type RawBuilder = Promise<Row[]> & { limit(n: number): RawBuilder };
+  let rawBuilder: RawBuilder;
+  rawBuilder = Object.assign(Promise.resolve([{ id: "project-1" }]), {
+    limit: vi.fn(() => rawBuilder),
+  });
+  const rawThen = vi.spyOn(rawBuilder, "then");
+  const query = createScopedSelectQuery(rawBuilder);
+
+  return { query, rawBuilder, rawThen };
+}
+
+function createScopedSelectQuery(rawBuilder: unknown) {
+  const rawDb = {
+    select() {
+      return {
+        from() {
+          return {
+            where() {
+              return rawBuilder;
+            },
+          };
+        },
+      };
+    },
+  } as unknown as ReturnType<typeof createFakeDb>;
+  const scopedDb = createScopedDb(rawDb, {
+    scopeName: "workspace",
+    scopeValue: "workspace-1",
+    strict: false,
+    rules: [scopeByColumn(projectsTbl, projectsTbl.workspaceId)],
+  });
+  return scopedDb
+    .select({ id: projectsTbl.id })
+    .from(projectsTbl)
+    .where(eq(projectsTbl.workspaceId, "workspace-1"));
+}
 
 function countColumnReferences(condition: SQL | undefined, columnName: string): number {
   const chunks = (condition as { queryChunks?: unknown[] } | undefined)?.queryChunks;
