@@ -12,6 +12,7 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
+- Publish the package under the `@modem-dev/drizzle-scoped-db` npm scope instead of `@modemdev/drizzle-scoped-db`.
 - Relational `with` includes on the callback/SQL API are now scoped instead of rejected. They previously failed closed with "does not support nested `with` relations". The RQBv2 object-filter API (Drizzle 1.0) still fails closed on `with` until object-filter injection into nested relations is supported.
 
 ## [0.14.0] - 2026-07-07
@@ -149,4 +150,4 @@ All notable user-visible changes to this project are documented in this file.
 
 ### Changed
 
-- Configure package for public npm publishing under `@modemdev/drizzle-scoped-db`.
+- Configure the package for public npm publishing.

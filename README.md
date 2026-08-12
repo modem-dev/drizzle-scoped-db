@@ -1,9 +1,9 @@
 # drizzle-scoped-db
 
-[![npm version](https://img.shields.io/npm/v/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
-[![types](https://img.shields.io/npm/types/@modemdev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modemdev/drizzle-scoped-db)
+[![npm version](https://img.shields.io/npm/v/@modem-dev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modem-dev/drizzle-scoped-db)
+[![types](https://img.shields.io/npm/types/@modem-dev/drizzle-scoped-db.svg)](https://www.npmjs.com/package/@modem-dev/drizzle-scoped-db)
 [![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](#development)
-[![license](https://img.shields.io/npm/l/@modemdev/drizzle-scoped-db.svg)](./LICENSE)
+[![license](https://img.shields.io/npm/l/@modem-dev/drizzle-scoped-db.svg)](./LICENSE)
 
 **One forgotten `WHERE` clause and a query returns rows it should never see. `drizzle-scoped-db` guards against that.**
 
@@ -106,12 +106,15 @@ Use app-layer scoping as your primary, visible guardrail; add RLS underneath whe
 
 ## Install
 
+> [!IMPORTANT]
+> As of `0.15.0`, the package is published under the `@modem-dev` npm organization as `@modem-dev/drizzle-scoped-db`. Use it instead of the former `@modemdev/drizzle-scoped-db` package.
+
 ```bash
-npm install @modemdev/drizzle-scoped-db drizzle-orm
+npm install @modem-dev/drizzle-scoped-db drizzle-orm
 ```
 
 ```bash
-pnpm add @modemdev/drizzle-scoped-db drizzle-orm
+pnpm add @modem-dev/drizzle-scoped-db drizzle-orm
 ```
 
 Drizzle is a peer dependency.
@@ -119,7 +122,7 @@ Drizzle is a peer dependency.
 ## Quick start
 
 ```ts
-import { createScopedDb, scopeByColumn } from "@modemdev/drizzle-scoped-db";
+import { createScopedDb, scopeByColumn } from "@modem-dev/drizzle-scoped-db";
 import { and, eq } from "drizzle-orm";
 import { projects, tasks } from "./schema";
 
@@ -323,7 +326,7 @@ await workspaceDb.select().from(projects).where(eq(projects.id, projectId));
 Use `scopeByColumn` with an object map for composite column scopes. It derives the injected predicate, insert/update validation, strict SQL validation, and RQBv2 object-filter support from one declaration.
 
 ```ts
-import { createScopedDb, scopeByColumn } from "@modemdev/drizzle-scoped-db";
+import { createScopedDb, scopeByColumn } from "@modem-dev/drizzle-scoped-db";
 
 const scopedDb = createScopedDb(db, {
   scopeName: "workspace-region",
@@ -340,7 +343,7 @@ const scopedDb = createScopedDb(db, {
 Use `scopeByPredicate` for predicates that cannot be represented as column equality, such as soft deletes or visibility flags:
 
 ```ts
-import { createScopedDb, scopeByPredicate } from "@modemdev/drizzle-scoped-db";
+import { createScopedDb, scopeByPredicate } from "@modem-dev/drizzle-scoped-db";
 import { isNull } from "drizzle-orm";
 
 const visibleDb = createScopedDb(db, {
@@ -543,7 +546,7 @@ type ScopeByPredicateOptions = {
 Optional startup assertion for projects that rely on `strict` mode or `containsColumnFilter`.
 
 ```ts
-import { assertDrizzleCompatibility } from "@modemdev/drizzle-scoped-db";
+import { assertDrizzleCompatibility } from "@modem-dev/drizzle-scoped-db";
 import { eq } from "drizzle-orm";
 
 // Name-only check (backward compatible)
