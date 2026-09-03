@@ -1,4 +1,4 @@
-import type { and, Column, eq, or, SQL, Table, TableConfig } from "drizzle-orm";
+import type { and, Column, eq, GetColumnData, or, SQL, Table, TableConfig } from "drizzle-orm";
 
 /** Table type used by Drizzle's PostgreSQL query builders. */
 export type ScopedTable = Table<TableConfig> & {
@@ -168,8 +168,8 @@ export type CreateScopedDbOptions<
  * so downstream spreads, `.map(...)`, and assignments stay usable.
  */
 export type InferSelection<TSelection> = {
-  [K in keyof TSelection]: TSelection[K] extends Column<infer Config>
-    ? Config["data"]
+  [K in keyof TSelection]: TSelection[K] extends Column
+    ? GetColumnData<TSelection[K], "query">
     : TSelection[K] extends SQL<infer T>
       ? T
       : TSelection[K] extends SQL.Aliased<infer T>

@@ -3,7 +3,12 @@ import { eq } from "drizzle-orm";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { SQLJsDatabase } from "drizzle-orm/sql-js";
 
-import { scopeByColumn, scopeByPredicate, type ScopedDb } from "../../src/index";
+import {
+  scopeByColumn,
+  scopeByPredicate,
+  type InferSelection,
+  type ScopedDb,
+} from "../../src/index";
 import { pgProjects } from "../integration/fixtures/postgres";
 import { sqliteProjects } from "../integration/fixtures/sqlite";
 import type { SQL } from "./fixtures";
@@ -30,6 +35,34 @@ describe("public type surface", () => {
   it("gates selectDistinctOn by real dialect DB types", () => {
     expectTypeOf<PgScopedDb["selectDistinctOn"]>().toBeFunction();
     expectTypeOf<SqliteScopedDb["selectDistinctOn"]>().toEqualTypeOf<undefined>();
+  });
+
+  it("preserves column nullability in explicit select projections", () => {
+    type Projection = InferSelection<{
+      name: typeof pgProjects.name;
+      regionId: typeof pgProjects.regionId;
+      nested: { regionId: typeof pgProjects.regionId };
+    }>;
+
+    expectTypeOf<Projection>().toEqualTypeOf<{
+      name: string;
+      regionId: string | null;
+      nested: { regionId: string | null };
+    }>();
+
+    const _assertScopedProjection = async (db: PgScopedDb) => {
+      const rows = await db
+        .select({
+          name: pgProjects.name,
+          regionId: pgProjects.regionId,
+          nested: { regionId: pgProjects.regionId },
+        })
+        .from(pgProjects)
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+
+      expectTypeOf(rows).toEqualTypeOf<Projection[]>();
+    };
+    void _assertScopedProjection;
   });
 
   it("preserves returning projection types for real PostgreSQL and SQLite database types", () => {
