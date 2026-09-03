@@ -4,6 +4,8 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-03
+
 ### Changed
 
 - `InferSelection` and scoped select projections now resolve through Drizzle's own `SelectResultFields`, so inference is identical before and after joins and whole-table projection entries resolve to rows. Unsupported leaf shapes are now `never`, as in Drizzle, instead of `unknown`.
