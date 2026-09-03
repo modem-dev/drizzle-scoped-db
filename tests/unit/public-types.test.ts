@@ -9,8 +9,12 @@ import {
   type InferSelection,
   type ScopedDb,
 } from "../../src/index";
-import { pgProjects } from "../integration/fixtures/postgres";
-import { sqliteProjects } from "../integration/fixtures/sqlite";
+import { pgProjects, pgTasks, type PgIntegrationDb } from "../integration/fixtures/postgres";
+import {
+  sqliteProjects,
+  sqliteTasks,
+  type SqliteIntegrationDb,
+} from "../integration/fixtures/sqlite";
 import type { SQL } from "./fixtures";
 
 type PgScopedDb = ScopedDb<PgliteDatabase<Record<string, never>>, string>;
@@ -63,6 +67,75 @@ describe("public type surface", () => {
       expectTypeOf(rows).toEqualTypeOf<Projection[]>();
     };
     void _assertScopedProjection;
+  });
+
+  it("matches Drizzle nullability for explicit left-join projections", () => {
+    type LeftJoinRows = {
+      projectId: string;
+      taskId: string | null;
+      task: { id: string; title: string } | null;
+    }[];
+    type InnerJoinRows = {
+      projectId: string;
+      taskId: string;
+      task: { id: string; title: string };
+    }[];
+
+    const _assertPgLeftJoin = async (rawDb: PgIntegrationDb, scopedDb: PgScopedDb) => {
+      const selection = {
+        projectId: pgProjects.id,
+        taskId: pgTasks.id,
+        task: { id: pgTasks.id, title: pgTasks.title },
+      };
+      const rawRows = await rawDb
+        .select(selection)
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+      const scopedRows = await scopedDb
+        .select(selection)
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+
+      expectTypeOf(rawRows).toEqualTypeOf<LeftJoinRows>();
+      expectTypeOf(scopedRows).toEqualTypeOf<LeftJoinRows>();
+
+      const innerJoinRows = await scopedDb
+        .select(selection)
+        .from(pgProjects)
+        .innerJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+      expectTypeOf(innerJoinRows).toEqualTypeOf<InnerJoinRows>();
+    };
+
+    const _assertSqliteLeftJoin = async (rawDb: SqliteIntegrationDb, scopedDb: SqliteScopedDb) => {
+      const selection = {
+        projectId: sqliteProjects.id,
+        taskId: sqliteTasks.id,
+        task: { id: sqliteTasks.id, title: sqliteTasks.title },
+      };
+      const rawRows = await rawDb
+        .select(selection)
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id));
+      const scopedRows = await scopedDb
+        .select(selection)
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"));
+
+      expectTypeOf(rawRows).toEqualTypeOf<LeftJoinRows>();
+      expectTypeOf(scopedRows).toEqualTypeOf<LeftJoinRows>();
+
+      const innerJoinRows = await scopedDb
+        .select(selection)
+        .from(sqliteProjects)
+        .innerJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"));
+      expectTypeOf(innerJoinRows).toEqualTypeOf<InnerJoinRows>();
+    };
+
+    void [_assertPgLeftJoin, _assertSqliteLeftJoin];
   });
 
   it("preserves returning projection types for real PostgreSQL and SQLite database types", () => {
