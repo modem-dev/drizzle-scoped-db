@@ -35,6 +35,11 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - name: Type-check benchmark gate
+        if: matrix.drizzle_label == 'locked'
+        run: |
+          pnpm bench:types -- --out /tmp/types-head.json
+          pnpm bench:types:compare -- --head /tmp/types-head.json --base-latest --summary "$GITHUB_STEP_SUMMARY"
       - run: pnpm test
       - run: pnpm coverage
       - run: pnpm build

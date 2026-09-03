@@ -45,8 +45,16 @@ jobs:
           pnpm bench:release:compare -- \
             --out dist/release/benchmark-comparison.json \
             --summary "$GITHUB_STEP_SUMMARY"
+      - name: Compare type-check benchmark snapshot
+        id: type-benchmark-gate
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_benchmark_regression }}
+        run: |
+          mkdir -p dist/release
+          pnpm bench:types:compare -- \
+            --out dist/release/type-benchmark-comparison.json \
+            --summary "$GITHUB_STEP_SUMMARY"
       - name: Require benchmark override reason
-        if: ${{ steps.benchmark-gate.outcome == 'failure' && github.event_name == 'workflow_dispatch' && inputs.allow_benchmark_regression }}
+        if: ${{ (steps.benchmark-gate.outcome == 'failure' || steps.type-benchmark-gate.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.allow_benchmark_regression }}
         env:
           BENCHMARK_REGRESSION_REASON: ${{ inputs.benchmark_regression_reason }}
         run: |
@@ -65,5 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-benchmark-comparison
-          path: dist/release/benchmark-comparison.json
+          path: |
+            dist/release/benchmark-comparison.json
+            dist/release/type-benchmark-comparison.json
           if-no-files-found: ignore

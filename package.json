@@ -40,6 +40,8 @@
   "scripts": {
     "bench:release": "pnpm build && node --expose-gc benchmarks/run-release.mjs",
     "bench:release:compare": "node scripts/compare-release-benchmarks.mjs",
+    "bench:types": "node benchmarks/run-types.mjs",
+    "bench:types:compare": "node scripts/compare-release-benchmarks.mjs --prefix types --title \"Type-check benchmark gate\"",
     "build": "pnpm clean && tsc -p tsconfig.build.json",
     "clean": "node scripts/clean-build.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",

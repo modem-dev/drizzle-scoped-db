@@ -7,7 +7,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const BENCHMARK_FILE_PATTERN = /^bench-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\.json$/;
+const DEFAULT_BENCHMARK_PREFIX = "bench";
+
+function benchmarkFilePattern(prefix) {
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escapedPrefix}-(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)\\.json$`);
+}
 
 /** Resolve the directory that stores committed release benchmark snapshots. */
 export function releaseBenchmarkDir(root = repoRoot) {
@@ -67,31 +72,30 @@ export function compareReleaseVersions(left, right) {
 }
 
 /** Return the committed benchmark path for one package version. */
-export function releaseBenchmarkPath(version, directory = releaseBenchmarkDir()) {
+export function releaseBenchmarkPath(
+  version,
+  directory = releaseBenchmarkDir(),
+  prefix = DEFAULT_BENCHMARK_PREFIX,
+) {
   parseReleaseVersion(version);
-  return path.join(directory, `bench-${version}.json`);
+  return path.join(directory, `${prefix}-${version}.json`);
 }
 
-/** Find the latest stable benchmark snapshot lower than the release candidate version. */
-export function findPreviousReleaseBenchmark(version, directory = releaseBenchmarkDir()) {
-  const current = parseReleaseVersion(version);
+function listStableBenchmarks(directory, prefix) {
   if (!existsSync(directory)) {
-    return undefined;
+    return [];
   }
 
-  const candidates = readdirSync(directory)
+  const pattern = benchmarkFilePattern(prefix);
+  return readdirSync(directory)
     .map((fileName) => {
-      const match = BENCHMARK_FILE_PATTERN.exec(fileName);
+      const match = pattern.exec(fileName);
       if (!match) {
         return undefined;
       }
 
       const candidateVersion = parseReleaseVersion(match[1]);
       if (candidateVersion.prerelease) {
-        return undefined;
-      }
-
-      if (compareReleaseVersions(candidateVersion.raw, current.raw) >= 0) {
         return undefined;
       }
 
@@ -102,8 +106,29 @@ export function findPreviousReleaseBenchmark(version, directory = releaseBenchma
     })
     .filter(Boolean)
     .sort((left, right) => compareReleaseVersions(right.version, left.version));
+}
 
-  return candidates[0];
+/** Find the latest stable benchmark snapshot lower than the release candidate version. */
+export function findPreviousReleaseBenchmark(
+  version,
+  directory = releaseBenchmarkDir(),
+  prefix = DEFAULT_BENCHMARK_PREFIX,
+) {
+  const current = parseReleaseVersion(version);
+  return listStableBenchmarks(directory, prefix).find(
+    (candidate) => compareReleaseVersions(candidate.version, current.raw) < 0,
+  );
+}
+
+/** Find the latest committed stable snapshot, for comparing unreleased work without a version bump. */
+export function findLatestReleaseBenchmark(
+  directory = releaseBenchmarkDir(),
+  prefix = DEFAULT_BENCHMARK_PREFIX,
+  excludePath,
+) {
+  return listStableBenchmarks(directory, prefix).find(
+    (candidate) => !excludePath || path.resolve(candidate.path) !== path.resolve(excludePath),
+  );
 }
 
 /** Read and lightly validate one benchmark JSON file. */
@@ -228,9 +253,13 @@ export function compareBenchmarkRuns(base, head) {
   };
 }
 
-function formatNumber(value) {
+function formatNumber(value, unit) {
   if (!Number.isFinite(value)) {
     return "∞";
+  }
+
+  if (unit === "count") {
+    return String(Math.round(value));
   }
 
   if (Math.abs(value) >= 100) {
@@ -262,7 +291,7 @@ function formatThresholdValue(value, unit) {
     return `${formatNumber(value)} ms`;
   }
 
-  return `${formatNumber(value)} ${formatUnit(unit)}`;
+  return `${formatNumber(value, unit)} ${formatUnit(unit)}`;
 }
 
 function formatThreshold(threshold, unit) {
@@ -282,7 +311,7 @@ export function formatComparisonMarkdown(comparison, options) {
     (row) => row.status === "fail" || row.status === "missing-head",
   );
   const lines = [
-    "## Release benchmark gate",
+    `## ${options.title ?? "Release benchmark gate"}`,
     "",
     comparison.failed
       ? `❌ ${failedRows.length} material benchmark regression${failedRows.length === 1 ? "" : "s"} found.`
@@ -314,8 +343,9 @@ export function formatComparisonMarkdown(comparison, options) {
           ? "⚠️"
           : "✅";
     lines.push(
-      `| ${status} ${row.status} | \`${row.name}\` | ${formatNumber(row.baseMedian)} ${unit} | ${formatNumber(
+      `| ${status} ${row.status} | \`${row.name}\` | ${formatNumber(row.baseMedian, row.unit)} ${unit} | ${formatNumber(
         row.headMedian,
+        row.unit,
       )} ${unit} | ${formatDeltaPercent(row.relativeDelta)} | ${formatThreshold(row.threshold, row.unit)} |`,
     );
   }
@@ -336,6 +366,8 @@ async function parseArgs(args) {
   const options = {
     releaseDir: releaseBenchmarkDir(),
     version: packageVersion,
+    prefix: DEFAULT_BENCHMARK_PREFIX,
+    baseLatest: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -381,6 +413,23 @@ async function parseArgs(args) {
       continue;
     }
 
+    if (arg === "--prefix") {
+      options.prefix = readArgValue(args, index);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--title") {
+      options.title = readArgValue(args, index);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--base-latest") {
+      options.baseLatest = true;
+      continue;
+    }
+
     throw new Error(`Unknown release benchmark comparison argument: ${arg}`);
   }
 
@@ -391,16 +440,19 @@ async function parseArgs(args) {
 /** Run the release benchmark comparison CLI. */
 export async function main(args = process.argv.slice(2)) {
   const options = await parseArgs(args);
-  const headPath = options.head ?? releaseBenchmarkPath(options.version, options.releaseDir);
+  const headPath =
+    options.head ?? releaseBenchmarkPath(options.version, options.releaseDir, options.prefix);
   if (!existsSync(headPath)) {
     throw new Error(
-      `Missing release benchmark ${headPath}. Run pnpm bench:release before tagging this release.`,
+      `Missing benchmark snapshot ${headPath}. Run the matching benchmark script (pnpm bench:release or pnpm bench:types) before tagging this release.`,
     );
   }
 
   const baseCandidate = options.base
     ? { version: path.basename(options.base), path: options.base }
-    : findPreviousReleaseBenchmark(options.version, options.releaseDir);
+    : options.baseLatest
+      ? findLatestReleaseBenchmark(options.releaseDir, options.prefix, headPath)
+      : findPreviousReleaseBenchmark(options.version, options.releaseDir, options.prefix);
   const head = await loadBenchmarkRun(headPath);
   const base = baseCandidate
     ? await loadBenchmarkRun(baseCandidate.path)
@@ -418,6 +470,7 @@ export async function main(args = process.argv.slice(2)) {
   }
 
   const markdown = formatComparisonMarkdown(comparison, {
+    title: options.title,
     baseLabel: options.base ?? baseCandidate?.version ?? "none",
     headLabel: path.basename(headPath),
     initialBaseline: !baseCandidate,
@@ -434,7 +487,9 @@ export async function main(args = process.argv.slice(2)) {
     );
   }
 
-  console.log(`Release benchmark gate passed on ${os.platform()}/${os.arch()}.`);
+  console.log(
+    `${options.title ?? "Release benchmark gate"} passed on ${os.platform()}/${os.arch()}.`,
+  );
 }
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {

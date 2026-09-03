@@ -575,11 +575,13 @@ pnpm test
 pnpm coverage
 ```
 
-Release prep also records a committed performance and heap-growth snapshot:
+Release prep also records committed performance, heap-growth, and type-check cost snapshots:
 
 ```bash
 pnpm bench:release
 pnpm bench:release:compare
+pnpm bench:types
+pnpm bench:types:compare
 ```
 
 The package has 100% statement, branch, function, and line coverage.
