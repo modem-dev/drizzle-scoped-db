@@ -1,4 +1,9 @@
 import type { and, Column, eq, GetColumnData, or, SQL, Table, TableConfig } from "drizzle-orm";
+import type {
+  AppendToNullabilityMap,
+  JoinNullability,
+  SelectResult,
+} from "drizzle-orm/query-builders/select.types";
 
 /** Table type used by Drizzle's PostgreSQL query builders. */
 export type ScopedTable = Table<TableConfig> & {
@@ -179,6 +184,30 @@ export type InferSelection<TSelection> = {
           : unknown;
 };
 
+type ApplyJoinNullability<
+  TResult,
+  TSelection,
+  TNullabilityMap extends Record<string, JoinNullability>,
+> = TSelection extends undefined ? TResult : SelectResult<TSelection, "partial", TNullabilityMap>[];
+
+type ScopedJoinedQueryBuilder<
+  TTable extends ScopedTable,
+  TResult,
+  TSelection,
+  TNullabilityMap extends Record<string, JoinNullability>,
+  TJoinTable extends Table<TableConfig>,
+  TJoinType extends "inner" | "left",
+> = ScopedQueryBuilder<
+  TTable,
+  ApplyJoinNullability<
+    TResult,
+    TSelection,
+    AppendToNullabilityMap<TNullabilityMap, TJoinTable["_"]["name"], TJoinType>
+  >,
+  TSelection,
+  AppendToNullabilityMap<TNullabilityMap, TJoinTable["_"]["name"], TJoinType>
+>;
+
 /** Query builder returned after `.where(...)` is called. */
 export interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
   limit(n: number): ScopedWhereBuilder<TResult>;
@@ -194,16 +223,18 @@ export interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
 export interface ScopedQueryBuilder<
   TTable extends ScopedTable,
   TResult = NonNullable<TTable["$inferSelect"]>[],
+  TSelection = undefined,
+  TNullabilityMap extends Record<string, JoinNullability> = Record<TTable["_"]["name"], "not-null">,
 > {
   where(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
   leftJoin<TJoinTable extends Table<TableConfig>>(
     table: TJoinTable,
     on: SQL | undefined,
-  ): ScopedQueryBuilder<TTable, TResult>;
+  ): ScopedJoinedQueryBuilder<TTable, TResult, TSelection, TNullabilityMap, TJoinTable, "left">;
   innerJoin<TJoinTable extends Table<TableConfig>>(
     table: TJoinTable,
     on: SQL | undefined,
-  ): ScopedQueryBuilder<TTable, TResult>;
+  ): ScopedJoinedQueryBuilder<TTable, TResult, TSelection, TNullabilityMap, TJoinTable, "inner">;
   then<TResult1 = TResult, TResult2 = never>(
     onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
@@ -218,7 +249,8 @@ export interface ScopedSelectBuilder<TSelection = undefined> {
     TTable,
     TSelection extends undefined
       ? NonNullable<TTable["$inferSelect"]>[]
-      : InferSelection<TSelection>[]
+      : InferSelection<TSelection>[],
+    TSelection
   >;
 }
 

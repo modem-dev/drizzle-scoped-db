@@ -7,6 +7,7 @@ All notable user-visible changes to this project are documented in this file.
 ### Fixed
 
 - Preserve nullable column types in explicit scoped select projections, including nested selection objects.
+- Match Drizzle's result nullability for explicit scoped left-join projections, including nested objects from the optional table.
 
 ## [0.16.0] - 2026-08-12
 
