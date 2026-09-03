@@ -12,6 +12,7 @@ import {
   createSqliteIntegrationDb,
   seedSqliteProjects,
   seedSqliteTasks,
+  seedSqliteUntaskedProject,
   sqliteProjects,
   sqliteTasks,
   type SqliteIntegrationDb,
@@ -147,12 +148,7 @@ describe("SQLite/sql.js integration", () => {
     const harness = await createSqliteIntegrationDb();
     try {
       await seedSqliteProjects(harness.db);
-      await harness.db.insert(sqliteProjects).values({
-        id: "project-3",
-        workspaceId: "workspace-1",
-        slug: "project-3",
-        name: "No in-scope tasks",
-      });
+      await seedSqliteUntaskedProject(harness.db);
       await seedSqliteTasks(harness.db);
       const scopedDb = createScopedSqliteDb(harness.db);
 
@@ -165,6 +161,36 @@ describe("SQLite/sql.js integration", () => {
         { projectId: "project-1", taskId: "task-1" },
         { projectId: "project-3", taskId: null },
       ]);
+    } finally {
+      closeSqliteIntegrationDb(harness);
+    }
+  });
+
+  it("returns Drizzle's nested per-table rows for whole-row left joins", async () => {
+    const harness = await createSqliteIntegrationDb();
+    try {
+      await seedSqliteProjects(harness.db);
+      await seedSqliteUntaskedProject(harness.db);
+      await seedSqliteTasks(harness.db);
+      const scopedDb = createScopedSqliteDb(harness.db);
+
+      const rows = await scopedDb
+        .select()
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id));
+
+      expectTypeOf(rows).toEqualTypeOf<
+        {
+          integration_projects: typeof sqliteProjects.$inferSelect;
+          integration_tasks: typeof sqliteTasks.$inferSelect | null;
+        }[]
+      >();
+      rows.sort((left, right) =>
+        left.integration_projects.id.localeCompare(right.integration_projects.id),
+      );
+      expect(rows.map((row) => row.integration_projects.id)).toEqual(["project-1", "project-3"]);
+      expect(rows[0]?.integration_tasks?.id).toBe("task-1");
+      expect(rows[1]?.integration_tasks).toBeNull();
     } finally {
       closeSqliteIntegrationDb(harness);
     }

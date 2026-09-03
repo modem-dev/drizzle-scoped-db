@@ -1,15 +1,27 @@
-import type { and, Column, eq, GetColumnData, or, SQL, Table, TableConfig } from "drizzle-orm";
+import type {
+  and,
+  Column,
+  eq,
+  InferInsertModel,
+  InferSelectModel,
+  or,
+  SQL,
+  Table,
+  TableConfig,
+} from "drizzle-orm";
 import type {
   AppendToNullabilityMap,
+  AppendToResult,
+  GetSelectTableSelection,
   JoinNullability,
+  JoinType,
+  SelectMode,
   SelectResult,
+  SelectResultFields,
 } from "drizzle-orm/query-builders/select.types";
 
-/** Table type used by Drizzle's PostgreSQL query builders. */
-export type ScopedTable = Table<TableConfig> & {
-  $inferSelect?: Record<string, unknown>;
-  $inferInsert?: Record<string, unknown>;
-};
+/** Dialect-generic Drizzle table type accepted by scoped facades. */
+export type ScopedTable = Table<TableConfig>;
 
 /** A callback that receives a Drizzle relational table proxy and operators, then returns a SQL predicate. */
 export type RelationalWhereCallback<TTable> = (
@@ -167,74 +179,102 @@ export type CreateScopedDbOptions<
 };
 
 /**
- * Type helper to infer selected values from a Drizzle selection object. Mirrors the shapes Drizzle
- * itself allows in a projection: plain columns, raw `sql<T>` fragments, aliased `sql<T>().as()`
- * fragments, and nested selection objects. Unknown leaf shapes fall back to `unknown` (not `never`)
- * so downstream spreads, `.map(...)`, and assignments stay usable.
+ * Type helper to infer selected values from a Drizzle selection object. Delegates to Drizzle's own
+ * `SelectResultFields`, so plain columns, raw `sql<T>` fragments, aliased `sql<T>().as()` fragments,
+ * whole tables, and nested selection objects resolve exactly as they do in a raw Drizzle query.
  */
-export type InferSelection<TSelection> = {
-  [K in keyof TSelection]: TSelection[K] extends Column
-    ? GetColumnData<TSelection[K], "query">
-    : TSelection[K] extends SQL<infer T>
-      ? T
-      : TSelection[K] extends SQL.Aliased<infer T>
-        ? T
-        : TSelection[K] extends Record<string, unknown>
-          ? InferSelection<TSelection[K]>
-          : unknown;
-};
+export type InferSelection<TSelection> = SelectResultFields<TSelection>;
 
-type ApplyJoinNullability<
-  TResult,
-  TSelection,
-  TNullabilityMap extends Record<string, JoinNullability>,
-> = TSelection extends undefined ? TResult : SelectResult<TSelection, "partial", TNullabilityMap>[];
+/** Join nullability map right after `.from(...)`: the root table always yields a row. */
+type RootNullabilityMap<TTable extends ScopedTable> = Record<TTable["_"]["name"], "not-null">;
 
-type ScopedJoinedQueryBuilder<
+/** Drizzle selection fields for a scoped select: the explicit projection, or the root table's columns. */
+type SelectionFields<TTable extends ScopedTable, TSelection> = TSelection extends undefined
+  ? GetSelectTableSelection<TTable>
+  : TSelection;
+
+/** Drizzle select mode for a scoped select: `partial` for explicit projections, `single` for whole rows. */
+type SelectionMode<TSelection> = TSelection extends undefined ? "single" : "partial";
+
+/**
+ * Scoped query builder whose awaited row type is derived once from its Drizzle selection state, the
+ * same way Drizzle's own select kinds default `TResult` from selection, mode, and nullability.
+ */
+type ScopedSelectQueryBuilder<
   TTable extends ScopedTable,
-  TResult,
-  TSelection,
+  TFields,
+  TSelectMode extends SelectMode,
   TNullabilityMap extends Record<string, JoinNullability>,
-  TJoinTable extends Table<TableConfig>,
-  TJoinType extends "inner" | "left",
 > = ScopedQueryBuilder<
   TTable,
-  ApplyJoinNullability<
-    TResult,
-    TSelection,
-    AppendToNullabilityMap<TNullabilityMap, TJoinTable["_"]["name"], TJoinType>
+  SelectResult<TFields, TSelectMode, TNullabilityMap>[],
+  TFields,
+  TSelectMode,
+  TNullabilityMap
+>;
+
+/** Query builder returned by `.from(...)`, before any join. */
+export type ScopedFromBuilder<TTable extends ScopedTable, TSelection> = ScopedSelectQueryBuilder<
+  TTable,
+  SelectionFields<TTable, TSelection>,
+  SelectionMode<TSelection>,
+  RootNullabilityMap<TTable>
+>;
+
+/**
+ * Query builder returned by `.leftJoin(...)` / `.innerJoin(...)`. Mirrors Drizzle's own join typing:
+ * explicit projections stay `partial`; whole-row selects become `multiple`, nesting each table's row
+ * under its table name. The nullability map accumulates so left-joined tables become nullable.
+ */
+type ScopedJoinedQueryBuilder<
+  TTable extends ScopedTable,
+  TFields,
+  TSelectMode extends SelectMode,
+  TNullabilityMap extends Record<string, JoinNullability>,
+  TJoinTable extends ScopedTable,
+  TJoinType extends JoinType,
+> = ScopedSelectQueryBuilder<
+  TTable,
+  AppendToResult<
+    TTable["_"]["name"],
+    TFields,
+    TJoinTable["_"]["name"],
+    GetSelectTableSelection<TJoinTable>,
+    TSelectMode
   >,
-  TSelection,
+  TSelectMode extends "partial" ? "partial" : "multiple",
   AppendToNullabilityMap<TNullabilityMap, TJoinTable["_"]["name"], TJoinType>
 >;
+
+/** Ordering/grouping expressions accepted by Drizzle across dialects. */
+export type ScopedOrderExpression = Column | SQL | SQL.Aliased;
 
 /** Query builder returned after `.where(...)` is called. */
 export interface ScopedWhereBuilder<TResult> extends Promise<TResult> {
   limit(n: number): ScopedWhereBuilder<TResult>;
   offset(n: number): ScopedWhereBuilder<TResult>;
-  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
-  orderBy(...columns: any[]): ScopedWhereBuilder<TResult>;
-  // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
-  groupBy(...columns: any[]): ScopedWhereBuilder<TResult>;
+  orderBy(...columns: ScopedOrderExpression[]): ScopedWhereBuilder<TResult>;
+  groupBy(...columns: ScopedOrderExpression[]): ScopedWhereBuilder<TResult>;
   having(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
 }
 
 /** Query builder returned after selecting from a scoped table. */
 export interface ScopedQueryBuilder<
   TTable extends ScopedTable,
-  TResult = NonNullable<TTable["$inferSelect"]>[],
-  TSelection = undefined,
-  TNullabilityMap extends Record<string, JoinNullability> = Record<TTable["_"]["name"], "not-null">,
+  TResult = InferSelectModel<TTable>[],
+  TFields = GetSelectTableSelection<TTable>,
+  TSelectMode extends SelectMode = "single",
+  TNullabilityMap extends Record<string, JoinNullability> = RootNullabilityMap<TTable>,
 > {
   where(condition: SQL | undefined): ScopedWhereBuilder<TResult>;
-  leftJoin<TJoinTable extends Table<TableConfig>>(
+  leftJoin<TJoinTable extends ScopedTable>(
     table: TJoinTable,
     on: SQL | undefined,
-  ): ScopedJoinedQueryBuilder<TTable, TResult, TSelection, TNullabilityMap, TJoinTable, "left">;
-  innerJoin<TJoinTable extends Table<TableConfig>>(
+  ): ScopedJoinedQueryBuilder<TTable, TFields, TSelectMode, TNullabilityMap, TJoinTable, "left">;
+  innerJoin<TJoinTable extends ScopedTable>(
     table: TJoinTable,
     on: SQL | undefined,
-  ): ScopedJoinedQueryBuilder<TTable, TResult, TSelection, TNullabilityMap, TJoinTable, "inner">;
+  ): ScopedJoinedQueryBuilder<TTable, TFields, TSelectMode, TNullabilityMap, TJoinTable, "inner">;
   then<TResult1 = TResult, TResult2 = never>(
     onfulfilled?: ((value: TResult) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
@@ -243,15 +283,7 @@ export interface ScopedQueryBuilder<
 
 /** Select builder facade that scopes only tables with matching rules. */
 export interface ScopedSelectBuilder<TSelection = undefined> {
-  from<TTable extends ScopedTable>(
-    table: TTable,
-  ): ScopedQueryBuilder<
-    TTable,
-    TSelection extends undefined
-      ? NonNullable<TTable["$inferSelect"]>[]
-      : InferSelection<TSelection>[],
-    TSelection
-  >;
+  from<TTable extends ScopedTable>(table: TTable): ScopedFromBuilder<TTable, TSelection>;
 }
 
 /**
@@ -273,9 +305,7 @@ export type ForwardMethod<TRaw, TName extends string> = [TRaw] extends [
  */
 export type ScopedReturning<TRaw, TTable> = [TRaw] extends [{ returning: unknown }]
   ? {
-      returning(): Promise<
-        NonNullable<TTable extends ScopedTable ? TTable["$inferSelect"] : never>[]
-      >;
+      returning(): Promise<(TTable extends ScopedTable ? InferSelectModel<TTable> : never)[]>;
       returning<TSelection extends Record<string, unknown>>(
         columns: TSelection,
       ): Promise<InferSelection<TSelection>[]>;
@@ -365,8 +395,8 @@ export type RawDeleteBuilder<TDb, TTable = ScopedTable> = TDb extends {
   ? TDelete
   : unknown;
 
-type TableInsertValue<TTable> = TTable extends { $inferInsert: infer TInsert }
-  ? { [K in keyof TInsert]: TInsert[K] | SQL }
+type TableInsertValue<TTable> = TTable extends ScopedTable
+  ? { [K in keyof InferInsertModel<TTable>]: InferInsertModel<TTable>[K] | SQL }
   : Record<string, unknown>;
 
 type TableUpdateValue<TTable> = Partial<TableInsertValue<TTable>>;

@@ -1,7 +1,8 @@
-import type { SQL, Table, TableConfig } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 
 import type {
-  InferSelection,
+  ScopedFromBuilder,
+  ScopedOrderExpression,
   ScopedQueryBuilder,
   ScopedSelectBuilder,
   ScopedTable,
@@ -18,14 +19,7 @@ export function createScopedSelectBuilder<TScope, TSelection>(
   options: NormalizedCreateScopedDbOptions<TScope>,
 ): ScopedSelectBuilder<TSelection> {
   return {
-    from<TTable extends ScopedTable>(
-      table: TTable,
-    ): ScopedQueryBuilder<
-      TTable,
-      TSelection extends undefined
-        ? NonNullable<TTable["$inferSelect"]>[]
-        : InferSelection<TSelection>[]
-    > {
+    from<TTable extends ScopedTable>(table: TTable): ScopedFromBuilder<TTable, TSelection> {
       const rule = getRuleForTable(table, options);
       const fromBuilder = selectBuilder.from(table);
 
@@ -36,11 +30,7 @@ export function createScopedSelectBuilder<TScope, TSelection>(
 }
 
 /** Build a scoped query builder for select queries on a protected table. */
-function createScopedFromBuilder<
-  TScope,
-  TTable extends ScopedTable,
-  TResult = NonNullable<TTable["$inferSelect"]>[],
->(
+function createScopedFromBuilder<TScope, TTable extends ScopedTable, TResult>(
   // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle builder internals are intentionally opaque.
   builder: any,
   rootRule: ScopedTableRule<TScope, TTable> | undefined,
@@ -53,7 +43,7 @@ function createScopedFromBuilder<
       return createScopedWhereBuilder<TResult>(rawBuilder);
     },
 
-    leftJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
+    leftJoin<TJoinTable extends ScopedTable>(joinTable: TJoinTable, on: SQL | undefined) {
       const joinRule = getRuleForTable(joinTable, options);
       return createScopedFromBuilder(
         builder.leftJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
@@ -62,7 +52,7 @@ function createScopedFromBuilder<
       );
     },
 
-    innerJoin<TJoinTable extends Table<TableConfig>>(joinTable: TJoinTable, on: SQL | undefined) {
+    innerJoin<TJoinTable extends ScopedTable>(joinTable: TJoinTable, on: SQL | undefined) {
       const joinRule = getRuleForTable(joinTable, options);
       return createScopedFromBuilder(
         builder.innerJoin(joinTable, scopeJoinCondition(on, joinRule, options)),
@@ -135,12 +125,10 @@ function createScopedWhereBuilder<TResult>(
     offset(n: number): ScopedWhereBuilder<TResult> {
       return continueWith(currentBuilder.offset(n));
     },
-    // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
-    orderBy(...columns: any[]): ScopedWhereBuilder<TResult> {
+    orderBy(...columns: ScopedOrderExpression[]): ScopedWhereBuilder<TResult> {
       return continueWith(currentBuilder.orderBy(...columns));
     },
-    // oxlint-disable-next-line typescript/no-explicit-any -- Drizzle accepts PgColumn | SQL | SQL.Aliased.
-    groupBy(...columns: any[]): ScopedWhereBuilder<TResult> {
+    groupBy(...columns: ScopedOrderExpression[]): ScopedWhereBuilder<TResult> {
       return continueWith(currentBuilder.groupBy(...columns));
     },
     having(condition: SQL | undefined): ScopedWhereBuilder<TResult> {

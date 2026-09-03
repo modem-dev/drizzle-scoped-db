@@ -1,7 +1,9 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { alias as pgAlias } from "drizzle-orm/pg-core";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { SQLJsDatabase } from "drizzle-orm/sql-js";
+import { alias as sqliteAlias } from "drizzle-orm/sqlite-core";
 
 import {
   scopeByColumn,
@@ -202,6 +204,181 @@ describe("public type surface", () => {
     };
 
     void [_assertPgChainedJoins, _assertSqliteChainedJoins];
+  });
+
+  it("matches Drizzle nullability when joining aliased tables", () => {
+    const _assertPgAliasJoin = async (rawDb: PgIntegrationDb, scopedDb: PgScopedDb) => {
+      const parentTask = pgAlias(pgTasks, "parent_task");
+      const selection = { taskId: pgTasks.id, parentTitle: parentTask.title };
+      const rawRows = await rawDb
+        .select(selection)
+        .from(pgTasks)
+        .leftJoin(parentTask, eq(parentTask.projectId, pgTasks.projectId));
+      const scopedRows = await scopedDb
+        .select(selection)
+        .from(pgTasks)
+        .leftJoin(parentTask, eq(parentTask.projectId, pgTasks.projectId))
+        .where(eq(pgTasks.workspaceId, "workspace-1"));
+
+      expectTypeOf(scopedRows).toEqualTypeOf(rawRows);
+      expectTypeOf(scopedRows).toEqualTypeOf<{ taskId: string; parentTitle: string | null }[]>();
+
+      const rawWholeRows = await rawDb
+        .select()
+        .from(pgTasks)
+        .leftJoin(parentTask, eq(parentTask.projectId, pgTasks.projectId));
+      const scopedWholeRows = await scopedDb
+        .select()
+        .from(pgTasks)
+        .leftJoin(parentTask, eq(parentTask.projectId, pgTasks.projectId))
+        .where(eq(pgTasks.workspaceId, "workspace-1"));
+      expectTypeOf(scopedWholeRows).toEqualTypeOf(rawWholeRows);
+      expectTypeOf<(typeof scopedWholeRows)[number]["parent_task"]>().toEqualTypeOf<
+        typeof pgTasks.$inferSelect | null
+      >();
+    };
+
+    const _assertSqliteAliasJoin = async (rawDb: SqliteIntegrationDb, scopedDb: SqliteScopedDb) => {
+      const parentTask = sqliteAlias(sqliteTasks, "parent_task");
+      const selection = { taskId: sqliteTasks.id, parentTitle: parentTask.title };
+      const rawRows = await rawDb
+        .select(selection)
+        .from(sqliteTasks)
+        .leftJoin(parentTask, eq(parentTask.projectId, sqliteTasks.projectId));
+      const scopedRows = await scopedDb
+        .select(selection)
+        .from(sqliteTasks)
+        .leftJoin(parentTask, eq(parentTask.projectId, sqliteTasks.projectId))
+        .where(eq(sqliteTasks.workspaceId, "workspace-1"));
+
+      expectTypeOf(scopedRows).toEqualTypeOf(rawRows);
+      expectTypeOf(scopedRows).toEqualTypeOf<{ taskId: string; parentTitle: string | null }[]>();
+    };
+
+    void [_assertPgAliasJoin, _assertSqliteAliasJoin];
+  });
+
+  it("matches Drizzle's nested row shape for whole-row selects with joins", () => {
+    type ProjectRow = typeof pgProjects.$inferSelect;
+    type TaskRow = typeof pgTasks.$inferSelect;
+    type NoteRow = typeof pgWithNotes.$inferSelect;
+
+    const _assertPgWholeRowJoins = async (rawDb: PgIntegrationDb, scopedDb: PgScopedDb) => {
+      const rawRows = await rawDb.select().from(pgProjects);
+      const scopedRows = await scopedDb
+        .select()
+        .from(pgProjects)
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedRows).toEqualTypeOf(rawRows);
+      expectTypeOf(scopedRows).toEqualTypeOf<ProjectRow[]>();
+
+      const rawLeftJoin = await rawDb
+        .select()
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+      const scopedLeftJoin = await scopedDb
+        .select()
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedLeftJoin).toEqualTypeOf(rawLeftJoin);
+      expectTypeOf(scopedLeftJoin).toEqualTypeOf<
+        { integration_projects: ProjectRow; integration_tasks: TaskRow | null }[]
+      >();
+
+      const rawChained = await rawDb
+        .select()
+        .from(pgProjects)
+        .innerJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .leftJoin(pgWithNotes, eq(pgWithNotes.taskId, pgTasks.id));
+      const scopedChained = await scopedDb
+        .select()
+        .from(pgProjects)
+        .innerJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .leftJoin(pgWithNotes, eq(pgWithNotes.taskId, pgTasks.id))
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedChained).toEqualTypeOf(rawChained);
+      expectTypeOf(scopedChained).toEqualTypeOf<
+        {
+          integration_projects: ProjectRow;
+          integration_tasks: TaskRow;
+          with_notes: NoteRow | null;
+        }[]
+      >();
+    };
+
+    const _assertSqliteWholeRowJoins = async (
+      rawDb: SqliteIntegrationDb,
+      scopedDb: SqliteScopedDb,
+    ) => {
+      const rawRows = await rawDb.select().from(sqliteProjects);
+      const scopedRows = await scopedDb
+        .select()
+        .from(sqliteProjects)
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedRows).toEqualTypeOf(rawRows);
+
+      const rawLeftJoin = await rawDb
+        .select()
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id));
+      const scopedLeftJoin = await scopedDb
+        .select()
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedLeftJoin).toEqualTypeOf(rawLeftJoin);
+
+      const rawChained = await rawDb
+        .select()
+        .from(sqliteProjects)
+        .innerJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .leftJoin(sqliteNotes, eq(sqliteNotes.taskId, sqliteTasks.id));
+      const scopedChained = await scopedDb
+        .select()
+        .from(sqliteProjects)
+        .innerJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .leftJoin(sqliteNotes, eq(sqliteNotes.taskId, sqliteTasks.id))
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedChained).toEqualTypeOf(rawChained);
+    };
+
+    void [_assertPgWholeRowJoins, _assertSqliteWholeRowJoins];
+  });
+
+  it("infers explicit projections identically before and after joins", () => {
+    const _assertConsistentInference = async (rawDb: PgIntegrationDb, scopedDb: PgScopedDb) => {
+      // Whole-table entries and sql fragments resolve through Drizzle's own inference in both positions.
+      const rootSelection = {
+        project: pgProjects,
+        upper: sql<string>`upper(${pgProjects.name})`,
+        lowered: sql<string>`lower(${pgProjects.name})`.as("lowered"),
+      };
+      const selection = { ...rootSelection, taskId: pgTasks.id };
+
+      const rawBeforeJoin = await rawDb.select(rootSelection).from(pgProjects);
+      const scopedBeforeJoin = await scopedDb
+        .select(rootSelection)
+        .from(pgProjects)
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedBeforeJoin).toEqualTypeOf(rawBeforeJoin);
+
+      const rawAfterJoin = await rawDb
+        .select(selection)
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+      const scopedAfterJoin = await scopedDb
+        .select(selection)
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+      expectTypeOf(scopedAfterJoin).toEqualTypeOf(rawAfterJoin);
+      type AfterJoinRow = (typeof scopedAfterJoin)[number];
+      expectTypeOf<AfterJoinRow["project"]>().toEqualTypeOf<typeof pgProjects.$inferSelect>();
+      expectTypeOf<AfterJoinRow["taskId"]>().toEqualTypeOf<string | null>();
+    };
+
+    void _assertConsistentInference;
   });
 
   it("preserves returning projection types for real PostgreSQL and SQLite database types", () => {

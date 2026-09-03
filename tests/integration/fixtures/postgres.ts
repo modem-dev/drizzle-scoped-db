@@ -308,6 +308,16 @@ export async function seedPgProjects(db: Pick<PgIntegrationDb, "insert">): Promi
   ]);
 }
 
+/** Adds an in-scope project with no tasks, so left joins yield a `null` joined row for it. */
+export async function seedPgUntaskedProject(db: Pick<PgIntegrationDb, "insert">): Promise<void> {
+  await db.insert(pgProjects).values({
+    id: "project-3",
+    workspaceId: "workspace-1",
+    slug: "project-3",
+    name: "No in-scope tasks",
+  });
+}
+
 export async function seedPgTasks(db: Pick<PgIntegrationDb, "insert">): Promise<void> {
   await db.insert(pgTasks).values([
     {
