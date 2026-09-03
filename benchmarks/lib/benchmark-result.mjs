@@ -34,6 +34,14 @@ export function classifyMetric(name) {
     return { unit: "bytes", comparable: false };
   }
 
+  if (name.endsWith("_count")) {
+    return {
+      unit: "count",
+      comparable: true,
+      threshold: { maxRegressionRatio: 1.2, minAbsoluteRegression: 5000 },
+    };
+  }
+
   return { unit: "count", comparable: false };
 }
 

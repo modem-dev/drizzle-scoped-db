@@ -58,6 +58,15 @@ pnpm bench:release:compare
 
 For unreleased branch checks that should not write a versioned snapshot, run `node --expose-gc benchmarks/run-release.mjs --version <next-version> --out /tmp/drizzle-scoped-db-head-bench.json` and compare with `scripts/compare-release-benchmarks.mjs --base benchmarks/release/<baseline>.json --head /tmp/drizzle-scoped-db-head-bench.json`.
 
+For changes to public builder types (`src/types.ts`, projection or join inference, mutation payload types), also run the type-check benchmark, which measures `tsc` counters for the fixed consumer workload in `benchmarks/types/consumer.ts`:
+
+```bash
+pnpm bench:types -- --out /tmp/drizzle-scoped-db-head-types.json
+pnpm bench:types:compare -- --head /tmp/drizzle-scoped-db-head-types.json --base-latest
+```
+
+CI runs the same comparison on the locked Drizzle matrix. `types/type_count` and `types/instantiation_count` gate at `+20%` and `+5000`; timing and memory are informational. Do not edit the consumer workload to make a comparison pass; regenerate the committed snapshot only when the workload, TypeScript, or Drizzle intentionally changes, and say so in the change. At release prep, `pnpm bench:types` writes the versioned `benchmarks/release/types-x.y.z.json` alongside the runtime snapshot.
+
 ## Changelog
 
 Maintain `CHANGELOG.md` as the source of truth for user-visible changes.
