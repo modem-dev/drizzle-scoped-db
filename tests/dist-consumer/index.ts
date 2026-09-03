@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { SQLJsDatabase } from "drizzle-orm/sql-js";
 import { pgTable, text as pgText } from "drizzle-orm/pg-core";
@@ -9,6 +10,12 @@ const pgProjects = pgTable("consumer_pg_projects", {
   id: pgText("id").primaryKey(),
   workspaceId: pgText("workspace_id").notNull(),
   name: pgText("name").notNull(),
+});
+
+const pgTasks = pgTable("consumer_pg_tasks", {
+  id: pgText("id").primaryKey(),
+  projectId: pgText("project_id").notNull(),
+  title: pgText("title").notNull(),
 });
 
 const sqliteProjects = sqliteTable("consumer_sqlite_projects", {
@@ -47,6 +54,29 @@ const _assertDistDeclarations = async (pgDb: PgScopedDb, sqliteDb: SqliteScopedD
     .values({ id: "p", workspaceId: "w", name: "Project" })
     .returning({ id: sqliteProjects.id });
   const _sqliteReturning: { id: string }[] = sqliteRows;
+
+  // Join inference survives declaration emit: whole-row joins nest per table, left joins are nullable.
+  const wholeRowJoin = await pgDb
+    .select()
+    .from(pgProjects)
+    .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+    .where(eq(pgProjects.workspaceId, "w"));
+  const _wholeRowJoin: {
+    consumer_pg_projects: typeof pgProjects.$inferSelect;
+    consumer_pg_tasks: typeof pgTasks.$inferSelect | null;
+  }[] = wholeRowJoin;
+  type _WholeRowJoinExact = Expect<
+    Equal<(typeof wholeRowJoin)[number]["consumer_pg_tasks"], typeof pgTasks.$inferSelect | null>
+  >;
+
+  const projectedJoin = await pgDb
+    .select({ projectId: pgProjects.id, taskTitle: pgTasks.title })
+    .from(pgProjects)
+    .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+    .where(eq(pgProjects.workspaceId, "w"));
+  type _ProjectedJoinExact = Expect<
+    Equal<(typeof projectedJoin)[number], { projectId: string; taskTitle: string | null }>
+  >;
 
   // @ts-expect-error Scoped select builders from emitted declarations stay narrow.
   void pgDb.select().from(pgProjects).prepare;

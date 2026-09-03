@@ -84,6 +84,16 @@ export async function seedSqliteProjects(db: SqliteIntegrationDb): Promise<void>
   ]);
 }
 
+/** Adds an in-scope project with no tasks, so left joins yield a `null` joined row for it. */
+export async function seedSqliteUntaskedProject(db: SqliteIntegrationDb): Promise<void> {
+  await db.insert(sqliteProjects).values({
+    id: "project-3",
+    workspaceId: "workspace-1",
+    slug: "project-3",
+    name: "No in-scope tasks",
+  });
+}
+
 export async function seedSqliteTasks(db: SqliteIntegrationDb): Promise<void> {
   await db.insert(sqliteTasks).values([
     {

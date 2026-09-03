@@ -4,10 +4,16 @@ All notable user-visible changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `InferSelection` and scoped select projections now resolve through Drizzle's own `SelectResultFields`, so inference is identical before and after joins and whole-table projection entries resolve to rows. Unsupported leaf shapes are now `never`, as in Drizzle, instead of `unknown`.
+- Scoped `orderBy(...)` and `groupBy(...)` accept `Column | SQL | SQL.Aliased` instead of `any`.
+
 ### Fixed
 
 - Preserve nullable column types in explicit scoped select projections, including nested selection objects.
 - Match Drizzle's result nullability for explicit scoped left-join projections, including nested objects from the optional table.
+- Type no-argument scoped `select()` results after `.leftJoin(...)` / `.innerJoin(...)` as Drizzle's nested per-table rows, with left-joined tables nullable, instead of flat root rows.
 
 ## [0.16.0] - 2026-08-12
 

@@ -21,6 +21,7 @@ import {
   pgWithTasks,
   seedPgProjects,
   seedPgTasks,
+  seedPgUntaskedProject,
   seedPgWithRelations,
   supportsRqbV1Relations,
   type PgIntegrationDb,
@@ -111,12 +112,7 @@ describe("Postgres/PGlite integration", () => {
     const db = await createPgIntegrationDb();
     try {
       await seedPgProjects(db);
-      await db.insert(pgProjects).values({
-        id: "project-3",
-        workspaceId: "workspace-1",
-        slug: "project-3",
-        name: "No in-scope tasks",
-      });
+      await seedPgUntaskedProject(db);
       await seedPgTasks(db);
       const scopedDb = createScopedPgDb(db);
 
@@ -129,6 +125,36 @@ describe("Postgres/PGlite integration", () => {
         { projectId: "project-1", taskId: "task-1" },
         { projectId: "project-3", taskId: null },
       ]);
+    } finally {
+      await closePgIntegrationDb(db);
+    }
+  });
+
+  it("returns Drizzle's nested per-table rows for whole-row left joins", async () => {
+    const db = await createPgIntegrationDb();
+    try {
+      await seedPgProjects(db);
+      await seedPgUntaskedProject(db);
+      await seedPgTasks(db);
+      const scopedDb = createScopedPgDb(db);
+
+      const rows = await scopedDb
+        .select()
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id));
+
+      expectTypeOf(rows).toEqualTypeOf<
+        {
+          integration_projects: typeof pgProjects.$inferSelect;
+          integration_tasks: typeof pgTasks.$inferSelect | null;
+        }[]
+      >();
+      rows.sort((left, right) =>
+        left.integration_projects.id.localeCompare(right.integration_projects.id),
+      );
+      expect(rows.map((row) => row.integration_projects.id)).toEqual(["project-1", "project-3"]);
+      expect(rows[0]?.integration_tasks?.id).toBe("task-1");
+      expect(rows[1]?.integration_tasks).toBeNull();
     } finally {
       await closePgIntegrationDb(db);
     }
