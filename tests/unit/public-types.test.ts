@@ -1,9 +1,19 @@
 import { describe, expectTypeOf, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { alias as pgAlias } from "drizzle-orm/pg-core";
+import {
+  mysqlTable,
+  varchar,
+  type MySqlInsertValue,
+  type MySqlUpdateSetSource,
+} from "drizzle-orm/mysql-core";
+import { alias as pgAlias, type PgInsertValue, type PgUpdateSetSource } from "drizzle-orm/pg-core";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import type { SQLJsDatabase } from "drizzle-orm/sql-js";
-import { alias as sqliteAlias } from "drizzle-orm/sqlite-core";
+import {
+  alias as sqliteAlias,
+  type SQLiteInsertValue,
+  type SQLiteUpdateSetSource,
+} from "drizzle-orm/sqlite-core";
 
 import {
   scopeByColumn,
@@ -379,6 +389,105 @@ describe("public type surface", () => {
     };
 
     void _assertConsistentInference;
+  });
+
+  it("derives insert and update payload types from the dialect builder", () => {
+    const _assertPayloads = (pgDb: PgScopedDb, sqliteDb: SqliteScopedDb) => {
+      // Dialect insert values accept placeholders and sql, exactly like raw Drizzle.
+      pgDb.insert(pgProjects).values({
+        id: sql.placeholder("id"),
+        workspaceId: "workspace-1",
+        slug: sql`gen_random_uuid()::text`,
+        name: "Roadmap",
+      });
+      sqliteDb
+        .insert(sqliteProjects)
+        .values([{ id: sql.placeholder("id"), workspaceId: "workspace-1", slug: "s", name: "n" }]);
+      type PgValues = Parameters<ReturnType<typeof pgDb.insert<typeof pgProjects>>["values"]>[0];
+      type SqliteValues = Parameters<
+        ReturnType<typeof sqliteDb.insert<typeof sqliteProjects>>["values"]
+      >[0];
+      expectTypeOf<PgValues>().toEqualTypeOf<PgInsertValue<typeof pgProjects>[]>();
+      expectTypeOf<SqliteValues>().toEqualTypeOf<SQLiteInsertValue<typeof sqliteProjects>[]>();
+
+      // Dialect update sources accept column references and sql.
+      pgDb.update(pgProjects).set({ name: pgProjects.slug, regionId: sql`null` });
+      sqliteDb.update(sqliteProjects).set({ name: sqliteProjects.slug });
+      type PgSet = Parameters<ReturnType<typeof pgDb.update<typeof pgProjects>>["set"]>[0];
+      type SqliteSet = Parameters<
+        ReturnType<typeof sqliteDb.update<typeof sqliteProjects>>["set"]
+      >[0];
+      expectTypeOf<PgSet>().toEqualTypeOf<PgUpdateSetSource<typeof pgProjects>>();
+      expectTypeOf<SqliteSet>().toEqualTypeOf<SQLiteUpdateSetSource<typeof sqliteProjects>>();
+
+      // @ts-expect-error Wrong column value type is rejected by the dialect payload type.
+      pgDb.insert(pgProjects).values({ id: 1, workspaceId: "w", slug: "s", name: "n" });
+      // @ts-expect-error Unknown columns are rejected by the dialect payload type.
+      pgDb.update(pgProjects).set({ nope: true });
+    };
+    void _assertPayloads;
+  });
+
+  it("selects MySQL payload and join types for MySQL tables", () => {
+    const mysqlProjects = mysqlTable("mysql_projects", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      workspaceId: varchar("workspace_id", { length: 64 }).notNull(),
+      name: varchar("name", { length: 255 }).notNull(),
+    });
+    const mysqlTasks = mysqlTable("mysql_tasks", {
+      id: varchar("id", { length: 64 }).primaryKey(),
+      projectId: varchar("project_id", { length: 64 }).notNull(),
+      title: varchar("title", { length: 255 }).notNull(),
+    });
+    // MySQL drivers are not dev dependencies; the payload types depend only on the table's dialect.
+    type MySqlLikeDb = {
+      insert(table: unknown): { values(values: unknown): { rowsAffected: number } };
+      update(table: unknown): {
+        set(values: unknown): { where(condition: SQL | undefined): { rowsAffected: number } };
+      };
+    };
+
+    const _assertMySql = async (db: ScopedDb<MySqlLikeDb, string>) => {
+      type Values = Parameters<ReturnType<typeof db.insert<typeof mysqlProjects>>["values"]>[0];
+      type SetValues = Parameters<ReturnType<typeof db.update<typeof mysqlProjects>>["set"]>[0];
+      expectTypeOf<Values>().toEqualTypeOf<MySqlInsertValue<typeof mysqlProjects>[]>();
+      expectTypeOf<SetValues>().toEqualTypeOf<MySqlUpdateSetSource<typeof mysqlProjects>>();
+
+      db.insert(mysqlProjects).values({ id: sql.placeholder("id"), workspaceId: "w", name: "n" });
+      db.update(mysqlProjects).set({ name: sql`upper(name)` });
+      // @ts-expect-error Wrong column value type is rejected by the MySQL payload type.
+      db.insert(mysqlProjects).values({ id: 1, workspaceId: "w", name: "n" });
+      // @ts-expect-error Unknown columns are rejected by the MySQL update source.
+      db.update(mysqlProjects).set({ nope: true });
+
+      const rows = await db
+        .select()
+        .from(mysqlProjects)
+        .leftJoin(mysqlTasks, eq(mysqlTasks.projectId, mysqlProjects.id))
+        .where(eq(mysqlProjects.workspaceId, "w"));
+      expectTypeOf(rows).toEqualTypeOf<
+        {
+          mysql_projects: typeof mysqlProjects.$inferSelect;
+          mysql_tasks: typeof mysqlTasks.$inferSelect | null;
+        }[]
+      >();
+    };
+    void _assertMySql;
+  });
+
+  it("constrains select projections to Drizzle selection shapes", () => {
+    const _assertProjections = (pgDb: PgScopedDb) => {
+      pgDb.select({ id: pgProjects.id, project: pgProjects, count: sql<number>`count(*)` });
+      pgDb.select({ nested: { id: pgProjects.id, lowered: sql<string>`lower(name)`.as("l") } });
+      pgDb.selectDistinct({ id: pgProjects.id });
+      pgDb.selectDistinctOn([pgProjects.id], { id: pgProjects.id });
+
+      // @ts-expect-error Plain values are not Drizzle selection fields.
+      pgDb.select({ nope: 42 });
+      // @ts-expect-error Nesting deeper than one level is not a Drizzle selection.
+      pgDb.select({ nested: { deeper: { id: pgProjects.id } } });
+    };
+    void _assertProjections;
   });
 
   it("preserves returning projection types for real PostgreSQL and SQLite database types", () => {

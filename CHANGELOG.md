@@ -8,6 +8,8 @@ All notable user-visible changes to this project are documented in this file.
 
 - `InferSelection` and scoped select projections now resolve through Drizzle's own `SelectResultFields`, so inference is identical before and after joins and whole-table projection entries resolve to rows. Unsupported leaf shapes are now `never`, as in Drizzle, instead of `unknown`.
 - Scoped `orderBy(...)` and `groupBy(...)` accept `Column | SQL | SQL.Aliased` instead of `any`.
+- Scoped `insert(...).values(...)` and `update(...).set(...)` payloads now use the dialect's own Drizzle types (`PgInsertValue`, `SQLiteInsertValue`, `MySqlInsertValue`, and the matching update set sources), selected by the table's dialect, so placeholders and column references are accepted exactly as in raw Drizzle. Other dialects keep the table-derived fallback.
+- `select(...)`, `selectDistinct(...)`, and `selectDistinctOn(...)` projections are constrained to Drizzle's `SelectedFields`, so non-selection objects are rejected at compile time.
 
 ### Fixed
 
