@@ -9,6 +9,14 @@ import type {
   Table,
   TableConfig,
 } from "drizzle-orm";
+import type { MySqlInsertValue, MySqlTable, MySqlUpdateSetSource } from "drizzle-orm/mysql-core";
+import type { SelectedFields } from "drizzle-orm/operations";
+import type { PgInsertValue, PgTable, PgUpdateSetSource } from "drizzle-orm/pg-core";
+import type {
+  SQLiteInsertValue,
+  SQLiteTable,
+  SQLiteUpdateSetSource,
+} from "drizzle-orm/sqlite-core";
 import type {
   AppendToNullabilityMap,
   AppendToResult,
@@ -184,6 +192,9 @@ export type CreateScopedDbOptions<
  * whole tables, and nested selection objects resolve exactly as they do in a raw Drizzle query.
  */
 export type InferSelection<TSelection> = SelectResultFields<TSelection>;
+
+/** Projection shapes Drizzle accepts in `select(...)`: columns, sql fragments, tables, and one level of nesting. */
+export type ScopedSelection = SelectedFields<Column, Table<TableConfig>>;
 
 /** Join nullability map right after `.from(...)`: the root table always yields a row. */
 type RootNullabilityMap<TTable extends ScopedTable> = Record<TTable["_"]["name"], "not-null">;
@@ -401,6 +412,59 @@ type TableInsertValue<TTable> = TTable extends ScopedTable
 
 type TableUpdateValue<TTable> = Partial<TableInsertValue<TTable>>;
 
+/**
+ * Drizzle's dialect literal for a table (`"pg"`, `"sqlite"`, `"mysql"`, ...); `string` for generic
+ * tables. Drizzle 1.0 exposes it as `_.dialect`; the 0.x line nests it under `_.config.dialect`.
+ */
+type TableDialect<TTable extends ScopedTable> = TTable["_"] extends {
+  dialect: infer TDialect extends string;
+}
+  ? TDialect
+  : TTable["_"] extends { config: { dialect: infer TDialect extends string } }
+    ? TDialect
+    : string;
+
+/**
+ * Insert payload for a scoped table, selected by the table's dialect: Drizzle's own `PgInsertValue`,
+ * `SQLiteInsertValue`, or `MySqlInsertValue`, so placeholders and dialect value shapes are accepted
+ * exactly as in raw Drizzle. Other dialects and generic tables fall back to the table's insert model.
+ * The dialect literal is the discriminator because the dialect table classes are structurally
+ * compatible with each other (a MySQL table satisfies `extends SQLiteTable`), and the raw builder
+ * cannot supply the payload: inferring it through the database's generic `insert(table)` erases the table.
+ */
+type DialectInsertValue<TTable> = TTable extends ScopedTable
+  ? TableDialect<TTable> extends "pg"
+    ? TTable extends PgTable
+      ? PgInsertValue<TTable>
+      : TableInsertValue<TTable>
+    : TableDialect<TTable> extends "sqlite"
+      ? TTable extends SQLiteTable
+        ? SQLiteInsertValue<TTable>
+        : TableInsertValue<TTable>
+      : TableDialect<TTable> extends "mysql"
+        ? TTable extends MySqlTable
+          ? MySqlInsertValue<TTable>
+          : TableInsertValue<TTable>
+        : TableInsertValue<TTable>
+  : Record<string, unknown>;
+
+/** Update payload for a scoped table, selected by dialect like {@link DialectInsertValue}. */
+type DialectUpdateSetValue<TTable> = TTable extends ScopedTable
+  ? TableDialect<TTable> extends "pg"
+    ? TTable extends PgTable
+      ? PgUpdateSetSource<TTable>
+      : TableUpdateValue<TTable>
+    : TableDialect<TTable> extends "sqlite"
+      ? TTable extends SQLiteTable
+        ? SQLiteUpdateSetSource<TTable>
+        : TableUpdateValue<TTable>
+      : TableDialect<TTable> extends "mysql"
+        ? TTable extends MySqlTable
+          ? MySqlUpdateSetSource<TTable>
+          : TableUpdateValue<TTable>
+        : TableUpdateValue<TTable>
+  : Record<string, unknown>;
+
 type RawInsertResultFromValues<TRawInsert> = [TRawInsert] extends [
   { values: (...args: never[]) => infer TResult },
 ]
@@ -410,10 +474,10 @@ type RawInsertResultFromValues<TRawInsert> = [TRawInsert] extends [
 /** Minimal insert builder facade exposed by scoped DB wrappers. */
 export interface ScopedInsertBuilder<TRawInsert = unknown, TTable = ScopedTable> {
   values(
-    value: TableInsertValue<TTable>,
+    value: DialectInsertValue<TTable>,
   ): ScopedInsertResult<RawInsertResultFromValues<TRawInsert>, TTable>;
   values(
-    values: TableInsertValue<TTable>[],
+    values: DialectInsertValue<TTable>[],
   ): ScopedInsertResult<RawInsertResultFromValues<TRawInsert>, TTable>;
 }
 
@@ -434,7 +498,7 @@ type RawUpdateSetResult<TRawUpdate> = [TRawUpdate] extends [
 /** Minimal update builder facade exposed by scoped DB wrappers. */
 export interface ScopedUpdateBuilder<TRawUpdate = unknown, TTable = ScopedTable> {
   set(
-    values: TableUpdateValue<TTable>,
+    values: DialectUpdateSetValue<TTable>,
   ): ScopedUpdateWhereBuilder<RawUpdateSetResult<TRawUpdate>, TTable>;
 }
 
@@ -469,17 +533,17 @@ export type ScopedDb<
   TScopeValuePropertyName extends string | undefined = undefined,
 > = {
   /** Select from a scoped table. */
-  select<TSelection extends Record<string, unknown> | undefined = undefined>(
+  select<TSelection extends ScopedSelection | undefined = undefined>(
     columns?: TSelection,
   ): ScopedSelectBuilder<TSelection>;
   /** Select distinct from a scoped table. */
-  selectDistinct<TSelection extends Record<string, unknown> | undefined = undefined>(
+  selectDistinct<TSelection extends ScopedSelection | undefined = undefined>(
     columns?: TSelection,
   ): ScopedSelectBuilder<TSelection>;
   /** Select distinct on columns from a scoped table, when the underlying DB exposes it. */
   selectDistinctOn: TDb extends { selectDistinctOn: infer TSelectDistinctOn }
     ? TSelectDistinctOn extends (...args: never[]) => unknown
-      ? <TSelection extends Record<string, unknown> | undefined = undefined>(
+      ? <TSelection extends ScopedSelection | undefined = undefined>(
           onColumns: unknown[],
           columns?: TSelection,
         ) => ScopedSelectBuilder<TSelection>
