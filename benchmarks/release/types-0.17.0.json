@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "generatedAt": "2026-09-03T05:08:54.632Z",
+  "gitSha": "498435d64c20bd68768ba426d2b20d866c669fb9",
+  "packageVersion": "0.17.0",
+  "runtime": {
+    "nodeVersion": "v24.18.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "typescriptVersion": "5.9.3",
+    "drizzleOrmVersion": "0.45.2"
+  },
+  "benchmarkConfig": {
+    "probe": "benchmarks/types/consumer.ts"
+  },
+  "samplesPerBenchmark": 3,
+  "results": [
+    {
+      "name": "types/check_time_ms",
+      "source": "types",
+      "samples": [210, 210, 210],
+      "median": 210,
+      "p75": 210,
+      "p95": 210,
+      "min": 210,
+      "max": 210,
+      "unit": "ms",
+      "comparable": false
+    },
+    {
+      "name": "types/instantiation_count",
+      "source": "types",
+      "samples": [104454, 104454, 104454],
+      "median": 104454,
+      "p75": 104454,
+      "p95": 104454,
+      "min": 104454,
+      "max": 104454,
+      "unit": "count",
+      "comparable": true,
+      "threshold": {
+        "maxRegressionRatio": 1.2,
+        "minAbsoluteRegression": 5000
+      }
+    },
+    {
+      "name": "types/memory_used_bytes",
+      "source": "types",
+      "samples": [177864704, 177696768, 177938432],
+      "median": 177864704,
+      "p75": 177938432,
+      "p95": 177938432,
+      "min": 177696768,
+      "max": 177938432,
+      "unit": "bytes",
+      "comparable": false
+    },
+    {
+      "name": "types/type_count",
+      "source": "types",
+      "samples": [26939, 26939, 26939],
+      "median": 26939,
+      "p75": 26939,
+      "p95": 26939,
+      "min": 26939,
+      "max": 26939,
+      "unit": "count",
+      "comparable": true,
+      "threshold": {
+        "maxRegressionRatio": 1.2,
+        "minAbsoluteRegression": 5000
+      }
+    }
+  ]
+}
