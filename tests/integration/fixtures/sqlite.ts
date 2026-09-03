@@ -21,6 +21,12 @@ export const sqliteTasks = sqliteTable("integration_tasks", {
   title: text("title").notNull(),
 });
 
+export const sqliteNotes = sqliteTable("integration_notes", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  body: text("body").notNull(),
+});
+
 export type SqliteIntegrationDb = SQLJsDatabase<Record<string, never>>;
 
 export type SqliteIntegrationHarness = {
@@ -47,6 +53,12 @@ export async function createSqliteIntegrationDb(): Promise<SqliteIntegrationHarn
       project_id text not null,
       workspace_id text not null,
       title text not null
+    );
+
+    create table integration_notes (
+      id text primary key,
+      task_id text not null,
+      body text not null
     );
   `);
 

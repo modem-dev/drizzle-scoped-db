@@ -9,8 +9,14 @@ import {
   type InferSelection,
   type ScopedDb,
 } from "../../src/index";
-import { pgProjects, pgTasks, type PgIntegrationDb } from "../integration/fixtures/postgres";
 import {
+  pgProjects,
+  pgTasks,
+  pgWithNotes,
+  type PgIntegrationDb,
+} from "../integration/fixtures/postgres";
+import {
+  sqliteNotes,
   sqliteProjects,
   sqliteTasks,
   type SqliteIntegrationDb,
@@ -136,6 +142,66 @@ describe("public type surface", () => {
     };
 
     void [_assertPgLeftJoin, _assertSqliteLeftJoin];
+  });
+
+  it("accumulates join nullability across chained joins and mixed-table nested objects", () => {
+    type ChainedRows = {
+      projectId: string;
+      taskId: string | null;
+      noteId: string;
+      detail: { taskTitle: string | null; projectName: string };
+    }[];
+
+    const _assertPgChainedJoins = async (rawDb: PgIntegrationDb, scopedDb: PgScopedDb) => {
+      const selection = {
+        projectId: pgProjects.id,
+        taskId: pgTasks.id,
+        noteId: pgWithNotes.id,
+        detail: { taskTitle: pgTasks.title, projectName: pgProjects.name },
+      };
+      const rawRows = await rawDb
+        .select(selection)
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .innerJoin(pgWithNotes, eq(pgWithNotes.taskId, pgTasks.id));
+      const scopedRows = await scopedDb
+        .select(selection)
+        .from(pgProjects)
+        .leftJoin(pgTasks, eq(pgTasks.projectId, pgProjects.id))
+        .innerJoin(pgWithNotes, eq(pgWithNotes.taskId, pgTasks.id))
+        .where(eq(pgProjects.workspaceId, "workspace-1"));
+
+      expectTypeOf(rawRows).toEqualTypeOf<ChainedRows>();
+      expectTypeOf(scopedRows).toEqualTypeOf<ChainedRows>();
+    };
+
+    const _assertSqliteChainedJoins = async (
+      rawDb: SqliteIntegrationDb,
+      scopedDb: SqliteScopedDb,
+    ) => {
+      const selection = {
+        projectId: sqliteProjects.id,
+        taskId: sqliteTasks.id,
+        noteId: sqliteNotes.id,
+        detail: { taskTitle: sqliteTasks.title, projectName: sqliteProjects.name },
+      };
+      const rawRows = await rawDb
+        .select(selection)
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .innerJoin(sqliteNotes, eq(sqliteNotes.taskId, sqliteTasks.id));
+      const scopedRows = await scopedDb
+        .select(selection)
+        .from(sqliteProjects)
+        .leftJoin(sqliteTasks, eq(sqliteTasks.projectId, sqliteProjects.id))
+        .innerJoin(sqliteNotes, eq(sqliteNotes.taskId, sqliteTasks.id))
+        .where(eq(sqliteProjects.workspaceId, "workspace-1"));
+
+      expectTypeOf(rawRows).toEqualTypeOf<ChainedRows>();
+      expectTypeOf(scopedRows).toEqualTypeOf<ChainedRows>();
+    };
+
+    void [_assertPgChainedJoins, _assertSqliteChainedJoins];
   });
 
   it("preserves returning projection types for real PostgreSQL and SQLite database types", () => {
