@@ -79,3 +79,18 @@ Maintain `CHANGELOG.md` as the source of truth for user-visible changes.
 ## Commits
 
 Use Conventional Commits: `<type>[scope]: <description>`.
+
+## Releases
+
+The release workflow expects a committed benchmark snapshot before the tag is pushed.
+
+1. Bump `version` in `package.json`.
+2. Move `## [Unreleased]` entries into a new `## [x.y.z] - YYYY-MM-DD` section in `CHANGELOG.md`.
+3. Run `pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm coverage && pnpm build`.
+4. Run `pnpm bench:release` — generates `benchmarks/release/bench-<version>.json`.
+5. Commit the version bump, changelog, and benchmark snapshot together.
+6. Merge the release PR to main.
+7. Tag: `git tag v<version> && git push origin v<version>`.
+8. Publish: `pnpm publish`.
+
+Do **not** push the tag before the benchmark file lands on main — the CI `bench:release:compare` gate will fail.
